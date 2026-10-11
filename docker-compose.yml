@@ -1,0 +1,58 @@
+﻿version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: netshield_postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: adminpassword
+      POSTGRES_DB: netshield
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+
+  mongodb:
+    image: mongo:6-jammy
+    container_name: netshield_mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: adminpassword
+      MONGO_INITDB_DATABASE: netshield
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+    restart: always
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: netshield_backend
+    environment:
+      - MONGO_DATABASE_URI=mongodb://admin:adminpassword@mongodb:27017/netshield?authSource=admin
+      - DATABASE_URL=postgresql://admin:adminpassword@postgres:5432/netshield
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongodb
+      - postgres
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: netshield_frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: always
+
+volumes:
+  pgdata:
+  mongodata:

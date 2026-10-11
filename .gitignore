@@ -1,0 +1,60 @@
+# ========================================================
+# ZeroBreach AI — Root Git Ignore Configuration
+# ========================================================
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# Environment & Credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python Virtual Environments & Caches
+venv/
+.venv/
+backend/venv/
+backend/scripts/.venv/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.pyo
+
+# Next.js & Node.js Artifacts
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+frontend/out/
+frontend/build/
+.yarn/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.vercel/
+*.tsbuildinfo
+
+# Large Datasets & Uploads (>100MB exceeds GitHub push limit)
+2017_improved/
+Training and Testing Sets/
+backend/uploads/
+*.csv.gz
+backend/ml/live_capture.csv
+test_capture.csv
+
+# Runtime Logs & Temporary Files
+*.log
+*.bak
+logs/
+backend/*.log
+backend/scripts/*.log
+scratch/
+tmp/
