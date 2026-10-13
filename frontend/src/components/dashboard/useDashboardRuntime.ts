@@ -92,6 +92,13 @@ export function useDashboardRuntime() {
     const scrollTimer = setTimeout(handleScrollspy, 100);
 
     const executeRuntimeScript = () => {
+      if (typeof window !== "undefined") {
+        (window as any).__API_BASE__ =
+          process.env.NEXT_PUBLIC_API_URL ||
+          (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+            ? "http://127.0.0.1:8000"
+            : "");
+      }
       if (typeof (window as any).__ZB_CLEANUP_3D__ === "function") {
         (window as any).__ZB_CLEANUP_3D__();
       }

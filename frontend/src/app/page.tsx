@@ -156,38 +156,65 @@ export default function LoginPage() {
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username || !password) return;
+  const handleLogin = async (e?: React.FormEvent, isDemo = false) => {
+    if (e) e.preventDefault();
+    if (!isDemo && (!username || !password)) return;
 
     setIsAuthenticating(true);
     setAuthError(null);
+
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+    if (isDemo) {
+      localStorage.setItem("token", "demo-token-" + Date.now());
+      localStorage.setItem("role", selectedRole || "admin");
+      localStorage.setItem("username", username || "admin");
+      localStorage.setItem("is_demo_mode", "true");
+      router.push("/dashboard");
+      setIsAuthenticating(false);
+      return;
+    }
 
     try {
       const formData = new URLSearchParams();
       formData.append("username", username);
       formData.append("password", password);
 
-      const response = await fetch("http://127.0.0.1:8000/api/auth/login", {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+      const response = await fetch(`${apiBase}/api/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: formData,
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
         localStorage.setItem("token", data.access_token);
         localStorage.setItem("role", data.role || "admin");
         localStorage.setItem("username", username);
+        localStorage.removeItem("is_demo_mode");
         router.push("/dashboard");
       } else {
         const errData = await response.json().catch(() => ({}));
         setAuthError(errData.detail || "Authentication rejected. Invalid operator credentials.");
       }
     } catch {
-      setAuthError("Authentication server unreachable. Ensure backend service is running on port 8000.");
+      // Graceful Portfolio / Resume Fallback:
+      // If deployed backend is cold-starting or offline, auto-enter interactive portfolio preview
+      setAuthError("Live backend initializing... Launching instant portfolio preview.");
+      setTimeout(() => {
+        localStorage.setItem("token", "demo-token-" + Date.now());
+        localStorage.setItem("role", selectedRole || "admin");
+        localStorage.setItem("username", username || "admin");
+        localStorage.setItem("is_demo_mode", "true");
+        router.push("/dashboard");
+      }, 700);
     } finally {
       setIsAuthenticating(false);
     }
@@ -501,6 +528,18 @@ export default function LoginPage() {
                         <span>SIGN IN</span>
                       </>
                     )}
+                  </motion.button>
+
+                  {/* 1-Click Portfolio / Recruiter Instant Access */}
+                  <motion.button
+                    whileHover={{ scale: 1.01, filter: "brightness(1.1)" }}
+                    whileTap={{ scale: 0.99 }}
+                    type="button"
+                    onClick={() => handleLogin(undefined, true)}
+                    className="w-full mt-2.5 bg-gradient-to-r from-[rgba(0,240,255,0.08)] to-[rgba(192,132,252,0.08)] hover:from-[rgba(0,240,255,0.18)] hover:to-[rgba(192,132,252,0.18)] border border-[#00f0ff]/30 hover:border-[#00f0ff]/70 text-[#00f0ff] font-mono text-[11px] font-bold rounded-xl py-2.5 px-3 flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-[0_0_15px_rgba(0,240,255,0.08)]"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-[#00f0ff] animate-pulse" />
+                    <span>⚡ 1-CLICK RECRUITER / DEMO ACCESS</span>
                   </motion.button>
                 </form>
 
