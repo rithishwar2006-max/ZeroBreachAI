@@ -9,4 +9,9 @@ python-multipart
 pandas
 numpy
 scikit-learn
+xgboost
+joblib
+dnspython
+requests
+python-dotenv
 sqlalchemy
