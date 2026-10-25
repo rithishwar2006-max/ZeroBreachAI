@@ -14,4 +14,7 @@ joblib
 dnspython
 requests
 python-dotenv
+google-generativeai
+psutil
+scapy
 sqlalchemy
