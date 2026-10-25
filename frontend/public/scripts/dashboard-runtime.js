@@ -581,6 +581,13 @@ document.documentElement.classList.add('js');
       eventSource.addEventListener('complete', (e) => {
         try {
           const data = JSON.parse(e.data);
+          if (data && data.total_scanned !== undefined) {
+            totalRows = data.total_scanned;
+            totalAnoms = data.total_anomalies !== undefined ? data.total_anomalies : totalAnoms;
+            if (scannedCount) scannedCount.textContent = totalRows.toLocaleString();
+            if (anomCount) anomCount.textContent = totalAnoms.toLocaleString();
+            if (chunkIdEl && data.total_chunks !== undefined) chunkIdEl.textContent = '#' + data.total_chunks;
+          }
           if (statusText) {
             statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#10b981;margin-right:6px"></span>SCAN COMPLETE';
             statusText.style.color = '#10b981';

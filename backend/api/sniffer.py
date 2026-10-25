@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import os
+import re
 import time
 import asyncio
 from database import mongo_db, get_db
@@ -67,15 +68,18 @@ def calculate_risk(prediction_label: str, confidence: float, dst_ip: str) -> dic
     asset_criticality = asset_info["criticality"]
     asset_name = asset_info["name"]
 
+    # Strictly clamp confidence to valid [0.0, 1.0] interval
+    safe_conf = max(0.0, min(1.0, float(confidence)))
+
     if prediction_label == "BENIGN":
-        final_risk_score = min(30.0, round((1 - confidence) * 30, 2))
+        final_risk_score = min(30.0, round((1.0 - safe_conf) * 30.0, 2))
         severity = "Low"
         attack_severity_weight = 0.0
     else:
         attack_severity_weight = ATTACK_SEVERITY.get(prediction_label, 0.5)
         
         base_risk_raw = (
-            (W_CONFIDENCE * confidence) +
+            (W_CONFIDENCE * safe_conf) +
             (W_SEVERITY * attack_severity_weight) +
             (W_ASSET * asset_criticality)
         )
@@ -95,6 +99,8 @@ def calculate_risk(prediction_label: str, confidence: float, dst_ip: str) -> dic
             severity = "Medium"
         else:
             severity = "Low"
+
+    final_risk_score = max(0.0, min(100.0, round(float(final_risk_score), 2)))
 
     return {
         "risk_score": final_risk_score,
@@ -183,12 +189,25 @@ except Exception as e:
 model = model_rf if model_rf is not None else model_xgb
 
 
+def _normalize_probs(probs):
+    if probs is None:
+        return None
+    try:
+        p = np.asarray(probs, dtype=np.float64)
+        row_sums = p.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1.0
+        p = p / row_sums
+        return np.clip(p, 0.0, 1.0)
+    except Exception:
+        return probs
+
 def ensemble_predict(X: "pd.DataFrame") -> tuple:
     """
     Dual-Model Confidence Arbitration Engine:
     Runs both Primary (Random Forest) and Challenger (XGBoost / ExtraTrees) models.
     For each network flow:
       - Evaluates the class probability distribution from both classifiers
+      - Normalizes probabilities to eliminate cross-version scikit-learn count artifacts
       - Compares the peak confidence: max(P_model1) vs max(P_model2)
       - Selects the classification from the model with the higher certainty
       - Tags winner ('RandomForest' or 'XGBoost') and flags disagreements for audit
@@ -203,6 +222,7 @@ def ensemble_predict(X: "pd.DataFrame") -> tuple:
     if model_rf is not None:
         try:
             probs_rf = model_rf.predict_proba(X)
+            probs_rf = _normalize_probs(probs_rf)
         except Exception as e:
             print(f"[WARN] Random Forest inference error: {e}")
             probs_rf = None
@@ -210,6 +230,7 @@ def ensemble_predict(X: "pd.DataFrame") -> tuple:
     if model_xgb is not None:
         try:
             probs_xgb = model_xgb.predict_proba(X)
+            probs_xgb = _normalize_probs(probs_xgb)
         except Exception as e:
             print(f"[WARN] Challenger inference error: {e}")
             probs_xgb = None
@@ -223,19 +244,19 @@ def ensemble_predict(X: "pd.DataFrame") -> tuple:
     # Single-model fallback if one model is unavailable
     if probs_rf is not None and probs_xgb is None:
         preds = np.argmax(probs_rf, axis=1)
-        confs = np.max(probs_rf, axis=1)
+        confs = np.clip(np.max(probs_rf, axis=1), 0.0, 1.0)
         decoded = label_encoder.inverse_transform(preds)
         return list(decoded), list(confs), ["RandomForest"] * n_samples, [False] * n_samples
 
     if probs_rf is None and probs_xgb is not None:
         preds = np.argmax(probs_xgb, axis=1)
-        confs = np.max(probs_xgb, axis=1)
+        confs = np.clip(np.max(probs_xgb, axis=1), 0.0, 1.0)
         decoded = label_encoder.inverse_transform(preds)
         return list(decoded), list(confs), [challenger_name] * n_samples, [False] * n_samples
 
     # Full Dual-Model Arbitration (High-Throughput Vectorized NumPy)
-    conf_rf  = np.max(probs_rf,  axis=1)
-    conf_xgb = np.max(probs_xgb, axis=1)
+    conf_rf  = np.clip(np.max(probs_rf,  axis=1), 0.0, 1.0)
+    conf_xgb = np.clip(np.max(probs_xgb, axis=1), 0.0, 1.0)
 
     pred_rf  = np.argmax(probs_rf,  axis=1)
     pred_xgb = np.argmax(probs_xgb, axis=1)
@@ -243,6 +264,7 @@ def ensemble_predict(X: "pd.DataFrame") -> tuple:
     use_rf = (conf_rf >= conf_xgb)
     winner_preds = np.where(use_rf, pred_rf, pred_xgb)
     winner_confs = np.where(use_rf, conf_rf, conf_xgb)
+    winner_confs = np.clip(winner_confs, 0.0, 1.0)
     model_used = ["RandomForest" if r else challenger_name for r in use_rf]
     disagreed = (pred_rf != pred_xgb).tolist()
 
@@ -631,12 +653,12 @@ async def upload_pcap_csv(file: UploadFile = File(...), current_user: User = Dep
             src_ips = df['src_ip'] if 'src_ip' in df.columns else pd.Series(['0.0.0.0'] * len(df))
             dst_ips = df['dst_ip'] if 'dst_ip' in df.columns else pd.Series(['0.0.0.0'] * len(df))
             
-            # 2. Drop identifiers
-            cols_to_drop = ['_id', 'timestamp', 'source_ip', 'destination_ip', 'flow_id', 'src_ip', 'dst_ip', 'src_port', 'dst_port', 'protocol']
+            # 2. Drop non-feature columns
+            cols_to_drop = ['id', '_id', 'timestamp', 'source_ip', 'destination_ip', 'flow_id', 'src_ip', 'dst_ip', 'src_port', 'dst_port', 'protocol', 'label', 'attack', 'threat', 'classification', 'attack_type', 'threat_type', 'class', 'attempted_category']
             X = df.drop(columns=[col for col in cols_to_drop if col in df.columns], errors='ignore')
 
-            # 3. Handle inf/nan
-            X = X.replace([np.inf, -np.inf], np.nan).fillna(0)
+            # 3. Handle inf/nan and non-numeric values
+            X = X.apply(pd.to_numeric, errors='coerce').replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
             # 4. Ensure all features match
             X = X.reindex(columns=feature_names, fill_value=0.0)
@@ -797,13 +819,15 @@ async def scan_dataset_stream(
         raise HTTPException(status_code=404, detail=f"Dataset {dataset} not found.")
 
     target_filename = os.path.basename(target_file)
-    session_id = f"stream_{target_filename}_{int(time.time())}"
+    display_filename = re.sub(r'^\d+_', '', target_filename)
+    is_uploaded = target_file.startswith(UPLOAD_DIR) or ("uploads" in target_file) or target_filename != clean_name or target_filename.startswith("uploaded_")
+    session_id = f"stream_{display_filename}_{int(time.time())}"
     start_time_utc = datetime.utcnow()
 
     # Clean existing logs and sessions for this file to maintain stateless accuracy
     try:
-        await mongo_db["scan_sessions"].delete_many({"filename": target_filename})
-        await mongo_db["traffic_logs"].delete_many({"filename": target_filename})
+        await mongo_db["scan_sessions"].delete_many({"filename": {"$in": [target_filename, display_filename]}})
+        await mongo_db["traffic_logs"].delete_many({"filename": {"$in": [target_filename, display_filename]}})
     except Exception:
         pass
 
@@ -811,8 +835,8 @@ async def scan_dataset_stream(
     try:
         await mongo_db["scan_sessions"].insert_one({
             "session_id": session_id,
-            "filename": target_filename,
-            "source_type": "stream",
+            "filename": display_filename,
+            "source_type": "upload" if is_uploaded else "stream",
             "start_time": start_time_utc,
             "updated_at": start_time_utc,
             "total_scanned": 0,
@@ -826,10 +850,33 @@ async def scan_dataset_stream(
     except Exception as e_init:
         print(f"[WARN] Error initializing scan session: {e_init}")
 
+    # Coerce query params safely for both FastAPI HTTP and direct programmatic invocation
+    try:
+        effective_chunk_size = int(chunk_size) if chunk_size is not None and not hasattr(chunk_size, 'default') else 100
+    except Exception:
+        effective_chunk_size = 100
+
+    try:
+        effective_delay_ms = int(delay_ms) if delay_ms is not None and not hasattr(delay_ms, 'default') else 0
+    except Exception:
+        effective_delay_ms = 0
+
+    try:
+        effective_max_flows = int(max_flows) if max_flows is not None and not hasattr(max_flows, 'default') else 0
+    except Exception:
+        effective_max_flows = 0
+
+    try:
+        effective_max_chunks = int(max_chunks) if max_chunks is not None and not hasattr(max_chunks, 'default') else 0
+    except Exception:
+        effective_max_chunks = 0
+
     # Compatibility: if max_flows not specified but max_chunks provided
-    effective_max_flows = max_flows
-    if effective_max_flows <= 0 and max_chunks > 0:
-        effective_max_flows = max_chunks * chunk_size
+    if effective_max_flows <= 0 and effective_max_chunks > 0:
+        effective_max_flows = effective_max_chunks * effective_chunk_size
+
+    chunk_size = effective_chunk_size
+    delay_ms = effective_delay_ms
 
     async def sse_event_generator():
         start_time = datetime.now()
@@ -842,13 +889,15 @@ async def scan_dataset_stream(
         last_heartbeat = time.time()
         last_db_flush = time.time()
 
-        yield f"id: 0\nevent: start\ndata: {json.dumps({'status': 'started', 'dataset': target_filename, 'chunk_size': chunk_size, 'max_flows': effective_max_flows})}\n\n"
+        yield f"id: 0\nevent: start\ndata: {json.dumps({'status': 'started', 'dataset': display_filename, 'chunk_size': chunk_size, 'max_flows': effective_max_flows})}\n\n"
 
         def get_chunk_generator():
             scanned = 0
             while True:
                 reader = pd.read_csv(target_file, chunksize=chunk_size)
+                rows_in_pass = 0
                 for c in reader:
+                    rows_in_pass += len(c)
                     if effective_max_flows > 0:
                         needed = effective_max_flows - scanned
                         if needed <= 0:
@@ -859,7 +908,8 @@ async def scan_dataset_stream(
                     scanned += len(c)
                     if effective_max_flows > 0 and scanned >= effective_max_flows:
                         return
-                if effective_max_flows <= 0:
+                # If custom uploaded file or user chose unlimited (0), stop after single complete file pass
+                if is_uploaded or effective_max_flows <= 0 or rows_in_pass == 0:
                     return
 
         try:
@@ -951,7 +1001,8 @@ async def scan_dataset_stream(
                         c_val = confs[i]
                         dst_str = dst_list[i] if i < len(dst_list) else "0.0.0.0"
                         src_str = src_list[i] if i < len(src_list) else "0.0.0.0"
-                        proto_val = proto_list[i] if i < len(proto_list) else "TCP"
+                        raw_proto = str(proto_list[i]).strip() if i < len(proto_list) else "TCP"
+                        proto_val = {"6": "TCP", "17": "UDP", "1": "ICMP", "0": "HOPOPT", "47": "GRE", "50": "ESP"}.get(raw_proto, raw_proto if raw_proto.isalpha() else f"IP-{raw_proto}")
                         risk_data = calculate_risk(p_label, float(c_val), dst_str)
 
                         if risk_data.get("risk_score", 0) >= 70:
@@ -960,7 +1011,7 @@ async def scan_dataset_stream(
                         chunk_db_logs.append({
                             'session_id': session_id,
                             'timestamp': datetime.utcnow(),
-                            'filename': target_filename,
+                            'filename': display_filename,
                             'source_ip': str(src_str),
                             'destination_ip': str(dst_str),
                             'protocol': str(proto_val),
@@ -992,7 +1043,8 @@ async def scan_dataset_stream(
                     src_str = src_list[i] if i < len(src_list) else "0.0.0.0"
                     sp = sp_list[i] if i < len(sp_list) else 0
                     dp = dp_list[i] if i < len(dp_list) else 0
-                    proto_val = proto_list[i] if i < len(proto_list) else "TCP"
+                    raw_proto = str(proto_list[i]).strip() if i < len(proto_list) else "TCP"
+                    proto_val = {"6": "TCP", "17": "UDP", "1": "ICMP", "0": "HOPOPT", "47": "GRE", "50": "ESP"}.get(raw_proto, raw_proto if raw_proto.isalpha() else f"IP-{raw_proto}")
 
                     risk_data = calculate_risk(p_label, float(c_val), dst_str)
 

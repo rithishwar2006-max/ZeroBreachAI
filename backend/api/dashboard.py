@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
 import os
+import re
 import joblib
 import pandas as pd
 import numpy as np
@@ -181,7 +182,8 @@ async def get_flow_volume(current_user: User = Depends(get_current_user)):
         src_type = s.get("source_type") or ("live_capture" if ("capture" in raw_fname.lower() or raw_fname == "Live Traffic" or not raw_fname.endswith(".csv")) else "stream")
         is_live = (src_type == "live_capture") or ("capture" in raw_fname.lower()) or (raw_fname == "Live Traffic")
 
-        display_name = "Live Capture" if is_live else raw_fname
+        clean_file = re.sub(r'^\d+_', '', raw_fname)
+        display_name = "Live Capture" if is_live else clean_file
         dedup_key = display_name.lower()
         if dedup_key in seen_files:
             continue
