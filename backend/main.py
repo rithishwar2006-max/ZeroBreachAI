@@ -1,11 +1,19 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import engine, Base
+from database import engine, Base, SessionLocal
 import models.user  # to ensure models are registered
 from api import auth, dashboard, sniffer, users
+from api.auth import seed_demo_users
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Create database tables and seed initial users
+try:
+    Base.metadata.create_all(bind=engine)
+    _db = SessionLocal()
+    seed_demo_users(_db)
+    _db.close()
+    print("[OK] Database tables created and demo users seeded.")
+except Exception as e:
+    print(f"[WARN] Database initialization warning: {e}")
 
 app = FastAPI(
     title="ZeroBreach AI",
@@ -16,7 +24,7 @@ app = FastAPI(
 # Configure CORS for the frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify the frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -248,15 +248,6 @@ class SnifferManager:
 
         return True, "Sniffer stopped successfully.", self.get_session_summary()
 
-    def status(self):
-        if (self.scapy_sniffer and getattr(self.scapy_sniffer, 'running', False)) or (self.process and self.process.poll() is None):
-            return "Running"
-        return "Stopped"
-
-# Global instance
-sniffer_manager = SnifferManager()
-
-
     def _emulate_packets(self):
         import random, time
         protos = ["TCP", "UDP", "TCP", "TCP"]
@@ -299,3 +290,11 @@ sniffer_manager = SnifferManager()
                 "total_bytes": random.randint(120, 15000),
             }
             self.record_flow(flow)
+
+    def status(self):
+        if (self.scapy_sniffer and getattr(self.scapy_sniffer, 'running', False)) or (self.process and self.process.poll() is None) or getattr(self, '_emulator_running', False):
+            return "Running"
+        return "Stopped"
+
+# Global instance
+sniffer_manager = SnifferManager()
