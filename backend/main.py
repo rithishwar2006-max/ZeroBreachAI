@@ -1,3 +1,4 @@
+import sys, traceback
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base, SessionLocal
@@ -42,3 +43,24 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+@app.get("/api/debug-status")
+def debug_status():
+    from database import engine, settings
+    res = {
+        "engine": str(engine.url) if engine else None,
+        "is_sqlite": "sqlite" in str(engine.url) if engine else False,
+        "commit": "6a9d3e2-debug",
+    }
+    try:
+        from database import SessionLocal
+        from models.user import User
+        db = SessionLocal()
+        users_list = [u.username for u in db.query(User).all()]
+        db.close()
+        res["users"] = users_list
+        res["status"] = "OK"
+    except Exception as e:
+        res["error"] = str(e)
+        res["traceback"] = traceback.format_exc()
+    return res
