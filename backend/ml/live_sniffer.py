@@ -251,24 +251,29 @@ class SnifferManager:
     def _emulate_packets(self):
         import random, time
         protos = ["TCP", "UDP", "TCP", "TCP"]
-        ports = [443, 80, 53, 22, 8080, 445]
-        threat_pool = [
-            ("BENIGN", "LOW", 12),
-            ("BENIGN", "LOW", 18),
-            ("BENIGN", "LOW", 8),
-            ("PortScan", "HIGH", 78),
-            ("DDoS", "CRITICAL", 94),
-            ("Web Attack", "HIGH", 72),
-            ("Botnet", "CRITICAL", 89),
+        ports = [443, 443, 443, 80, 53, 53, 8443, 123]
+        real_domains_ips = [
+            "142.250.190.46",  # Google
+            "104.21.48.112",   # Cloudflare
+            "151.101.65.140",  # Fastly
+            "52.216.104.18",   # AWS S3
+            "1.1.1.1",         # Cloudflare DNS
+            "8.8.8.8",         # Google DNS
+            "192.168.1.1",     # Default Gateway
         ]
         while getattr(self, '_emulator_running', False):
             time.sleep(random.uniform(0.18, 0.40))
             proto = random.choice(protos)
-            sport = random.randint(30000, 65000)
+            sport = random.randint(49152, 65535)
             dport = random.choice(ports)
-            src_ip = f"192.168.1.{random.randint(10, 250)}"
-            dst_ip = f"10.0.0.{random.randint(1, 50)}" if random.random() < 0.6 else f"104.21.{random.randint(1, 250)}.{random.randint(1, 250)}"
-            pred, sev, risk = random.choices(threat_pool, weights=[65, 15, 10, 4, 3, 2, 1])[0]
+            src_ip = f"192.168.1.{random.randint(50, 150)}"
+            dst_ip = random.choice(real_domains_ips) if random.random() < 0.8 else f"104.26.{random.randint(1, 200)}.{random.randint(1, 200)}"
+            
+            # Normal domestic / enterprise Wi-Fi traffic is practically 100% BENIGN
+            pred = "BENIGN"
+            sev = "LOW"
+            risk = round(random.uniform(2.0, 14.5), 1)
+
             flow = {
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "source_ip": src_ip,
@@ -284,10 +289,10 @@ class SnifferManager:
                 "severity": sev,
                 "risk_score": risk,
                 "model_used": "Dual-Model Ensemble (RF + XGB)",
-                "confidence": round(random.uniform(0.92, 0.99), 3),
-                "flow_duration": random.randint(100, 50000),
-                "total_packets": random.randint(2, 60),
-                "total_bytes": random.randint(120, 15000),
+                "confidence": round(random.uniform(0.96, 0.999), 3),
+                "flow_duration": random.randint(200, 35000),
+                "total_packets": random.randint(4, 45),
+                "total_bytes": random.randint(240, 12500),
             }
             self.record_flow(flow)
 

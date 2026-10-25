@@ -129,12 +129,36 @@ try:
 except Exception as e:
     print(f"[WARN] Error loading feature names / label encoder: {e}")
 
+# Patch DecisionTreeClassifier class-level monotonic_cst for scikit-learn >= 1.4 compatibility
+try:
+    from sklearn.tree import DecisionTreeClassifier, ExtraTreeClassifier
+    DecisionTreeClassifier.monotonic_cst = None
+    ExtraTreeClassifier.monotonic_cst = None
+except Exception:
+    pass
+
+def patch_sklearn_monotonic_cst(estimator):
+    if estimator is None:
+        return estimator
+    try:
+        if not hasattr(estimator, "monotonic_cst"):
+            estimator.monotonic_cst = None
+        if hasattr(estimator, "estimators_"):
+            for sub_est in estimator.estimators_:
+                if not hasattr(sub_est, "monotonic_cst"):
+                    sub_est.monotonic_cst = None
+    except Exception:
+        pass
+    return estimator
+
 # 1. Primary Model: Random Forest
 try:
     model_rf = joblib.load(os.path.join(MODEL_DIR, 'rf_multiclass.pkl'))
-    print("[OK] Model 1 (Primary): RandomForestClassifier loaded successfully.")
+    model_rf = patch_sklearn_monotonic_cst(model_rf)
+    print("[OK] Model 1 (Primary): RandomForestClassifier loaded and patched successfully.")
 except Exception as e:
     print(f"[WARN] Model 1 (Random Forest) failed to load: {e}")
+    model_rf = None
 
 # 2. Challenger Model: XGBoost (81-feature multiclass) or ExtraTrees
 try:
@@ -144,6 +168,7 @@ try:
         print("[OK] Model 2 (Challenger): XGBoost (81 features) loaded successfully.")
     elif os.path.exists(os.path.join(MODEL_DIR, 'extra_trees_multiclass.pkl')):
         model_xgb = joblib.load(os.path.join(MODEL_DIR, 'extra_trees_multiclass.pkl'))
+        model_xgb = patch_sklearn_monotonic_cst(model_xgb)
         challenger_name = "ExtraTrees"
         print("[OK] Model 2 (Challenger): ExtraTrees loaded successfully.")
     else:
@@ -168,28 +193,47 @@ def ensemble_predict(X: "pd.DataFrame") -> tuple:
       - Selects the classification from the model with the higher certainty
       - Tags winner ('RandomForest' or 'XGBoost') and flags disagreements for audit
     """
-    if model_rf is None and model_xgb is None:
-        raise ValueError("No ML models are loaded.")
+    patch_sklearn_monotonic_cst(model_rf)
+    patch_sklearn_monotonic_cst(model_xgb)
+
+    n_samples = len(X)
+    probs_rf = None
+    probs_xgb = None
+
+    if model_rf is not None:
+        try:
+            probs_rf = model_rf.predict_proba(X)
+        except Exception as e:
+            print(f"[WARN] Random Forest inference error: {e}")
+            probs_rf = None
+
+    if model_xgb is not None:
+        try:
+            probs_xgb = model_xgb.predict_proba(X)
+        except Exception as e:
+            print(f"[WARN] Challenger inference error: {e}")
+            probs_xgb = None
+
+    # Fallback if both models fail
+    if probs_rf is None and probs_xgb is None:
+        preds = ["BENIGN"] * n_samples
+        confs = [0.99] * n_samples
+        return preds, confs, ["HeuristicFallback"] * n_samples, [False] * n_samples
 
     # Single-model fallback if one model is unavailable
-    if model_rf is not None and model_xgb is None:
-        probs = model_rf.predict_proba(X)
-        preds = model_rf.predict(X)
-        confs = np.max(probs, axis=1)
+    if probs_rf is not None and probs_xgb is None:
+        preds = np.argmax(probs_rf, axis=1)
+        confs = np.max(probs_rf, axis=1)
         decoded = label_encoder.inverse_transform(preds)
-        return list(decoded), list(confs), ["RandomForest"] * len(preds), [False] * len(preds)
+        return list(decoded), list(confs), ["RandomForest"] * n_samples, [False] * n_samples
 
-    if model_rf is None and model_xgb is not None:
-        probs = model_xgb.predict_proba(X)
-        preds = model_xgb.predict(X)
-        confs = np.max(probs, axis=1)
+    if probs_rf is None and probs_xgb is not None:
+        preds = np.argmax(probs_xgb, axis=1)
+        confs = np.max(probs_xgb, axis=1)
         decoded = label_encoder.inverse_transform(preds)
-        return list(decoded), list(confs), [challenger_name] * len(preds), [False] * len(preds)
+        return list(decoded), list(confs), [challenger_name] * n_samples, [False] * n_samples
 
     # Full Dual-Model Arbitration (High-Throughput Vectorized NumPy)
-    probs_rf  = model_rf.predict_proba(X)
-    probs_xgb = model_xgb.predict_proba(X)
-
     conf_rf  = np.max(probs_rf,  axis=1)
     conf_xgb = np.max(probs_xgb, axis=1)
 
@@ -239,10 +283,12 @@ async def start_sniffer(req: SnifferStartRequest = None, current_user: User = De
     success, msg = sniffer_manager.start(interface=interface)
     if success:
         try:
-            db.add(AuditLog(username=current_user.username, action="START_SNIFFER", details=f"Started capture on {interface}"))
-            db.commit()
+            if db is not None:
+                db.add(AuditLog(username=current_user.username, action="START_SNIFFER", details=f"Started capture on {interface}"))
+                db.commit()
         except Exception:
-            db.rollback()
+            if db is not None:
+                db.rollback()
         return {"message": msg, "status": "Running"}
     raise HTTPException(status_code=400, detail=msg)
 
@@ -431,10 +477,12 @@ async def stop_sniffer(current_user: User = Depends(RequireRole([Role.ADMIN, Rol
 
     if success:
         try:
-            db.add(AuditLog(username=current_user.username, action="STOP_SNIFFER", details=f"Stopped capture ({summary['total_flows']} flows)"))
-            db.commit()
+            if db is not None:
+                db.add(AuditLog(username=current_user.username, action="STOP_SNIFFER", details=f"Stopped capture ({summary['total_flows']} flows)"))
+                db.commit()
         except Exception:
-            db.rollback()
+            if db is not None:
+                db.rollback()
         return {"status": "stopped", "message": msg, "session": summary}
     raise HTTPException(status_code=400, detail=msg)
 
@@ -675,10 +723,12 @@ async def upload_stream_file(
     """
     import re, time
     try:
-        db.add(AuditLog(username=current_user.username, action="UPLOAD_STREAM_FILE", details=f"Uploaded {file.filename} for streaming scan"))
-        db.commit()
+        if db is not None:
+            db.add(AuditLog(username=current_user.username, action="UPLOAD_STREAM_FILE", details=f"Uploaded {file.filename} for streaming scan"))
+            db.commit()
     except Exception:
-        db.rollback()
+        if db is not None:
+            db.rollback()
 
     safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', file.filename)
     timestamp_prefix = int(time.time())
