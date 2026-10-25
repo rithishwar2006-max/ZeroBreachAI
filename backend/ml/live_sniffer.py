@@ -3,7 +3,10 @@ import os
 import psutil
 from datetime import datetime
 from collections import Counter
-from scapy.arch.windows import get_windows_if_list
+try:
+    from scapy.arch.windows import get_windows_if_list
+except (ImportError, ModuleNotFoundError):
+    get_windows_if_list = lambda: []
 
 class SnifferManager:
     def __init__(self):
@@ -64,16 +67,25 @@ class SnifferManager:
             pass
 
     def get_default_interface(self):
-        interfaces = get_windows_if_list()
-        for iface in interfaces:
-            if "Wi-Fi" in iface.get('name', ''):
-                return iface['name']
-        for iface in interfaces:
-            if "Ethernet" in iface.get('name', ''):
-                return iface['name']
-        if interfaces:
-            return interfaces[0]['name']
-        return "Wi-Fi"
+        try:
+            interfaces = get_windows_if_list()
+            for iface in interfaces:
+                if "Wi-Fi" in iface.get('name', ''):
+                    return iface['name']
+            for iface in interfaces:
+                if "Ethernet" in iface.get('name', ''):
+                    return iface['name']
+            if interfaces:
+                return interfaces[0]['name']
+        except Exception:
+            pass
+        try:
+            import scapy.all as scapy
+            for name, iface in scapy.IFACES.items():
+                return getattr(iface, 'name', name)
+        except Exception:
+            pass
+        return "eth0"
 
     def record_flow(self, flow_dict: dict):
         if len(self.session_flows) < 1000:
