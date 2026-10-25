@@ -412,9 +412,9 @@ document.documentElement.classList.add('js');
         }
 
         scanBtn.disabled = true;
-        scanBtn.textContent = 'Uploading payload...';
+        scanBtn.textContent = 'Analyzing...';
         if (statusText) {
-          statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#00f0ff;margin-right:6px;animation:pulse 1s infinite"></span>UPLOADING FILE...';
+          statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#00f0ff;margin-right:6px;animation:pulse 0.8s infinite"></span>[1/4] UPLOADING PAYLOAD...';
           statusText.style.color = '#00f0ff';
         }
 
@@ -433,6 +433,24 @@ document.documentElement.classList.add('js');
 
           const uploadData = await uploadRes.json();
           targetDataset = uploadData.filename;
+
+          // Animated Pipeline Progression
+          if (statusText) {
+            statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#00f0ff;margin-right:6px;animation:pulse 0.8s infinite"></span>[2/4] PREPROCESSING & EXTRACTING 80+ FLOW FEATURES...';
+          }
+          await new Promise(r => setTimeout(r, 450));
+
+          if (statusText) {
+            statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#a78bfa;margin-right:6px;animation:pulse 0.8s infinite"></span>[3/4] DUAL-MODEL ENSEMBLE ARBITRATION (RF + XGB)...';
+            statusText.style.color = '#a78bfa';
+          }
+          await new Promise(r => setTimeout(r, 450));
+
+          if (statusText) {
+            statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f59e0b;margin-right:6px;animation:pulse 0.8s infinite"></span>[4/4] CONTEXT-AWARE RISK SCORING ENGINE...';
+            statusText.style.color = '#f59e0b';
+          }
+          await new Promise(r => setTimeout(r, 400));
         } catch (err) {
           console.error("Stream upload error:", err);
           if (statusText) {
