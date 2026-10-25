@@ -95,15 +95,14 @@ async def get_recent_alerts(current_user: User = Depends(get_current_user), skip
         # Format the actual timestamp from the database (convert UTC to Local time)
         alert_time = alert.get("timestamp")
         if alert_time:
-            # MongoDB stores as UTC naive datetime, we attach UTC then convert to local
-            import pytz
-            from tzlocal import get_localzone
-            
-            utc_time = alert_time.replace(tzinfo=pytz.utc)
-            local_tz = get_localzone()
-            local_time = utc_time.astimezone(local_tz)
-            
-            time_str = local_time.strftime("%b %d, %I:%M %p")
+            from datetime import timezone
+            if hasattr(alert_time, "tzinfo") and alert_time.tzinfo is None:
+                local_time = alert_time.replace(tzinfo=timezone.utc).astimezone()
+            elif hasattr(alert_time, "astimezone"):
+                local_time = alert_time.astimezone()
+            else:
+                local_time = alert_time
+            time_str = local_time.strftime("%b %d, %I:%M %p") if hasattr(local_time, "strftime") else str(local_time)
         else:
             time_str = "Unknown"
             
@@ -130,11 +129,7 @@ async def get_flow_volume(current_user: User = Depends(get_current_user)):
     Each bar on the chart represents 1 distinct CSV upload or live capture session.
     Guarantees no repeating timestamps and clear session-by-session volume comparison.
     """
-    import pytz
-    from tzlocal import get_localzone
     from datetime import datetime, timezone, timedelta
-
-    local_tz = get_localzone()
     sessions_col = mongo_db["scan_sessions"]
 
     # 1. Retrieve latest sessions (completed or active)
@@ -195,9 +190,12 @@ async def get_flow_volume(current_user: User = Depends(get_current_user)):
         st = s.get("start_time")
         if not isinstance(st, datetime):
             st = datetime.utcnow()
-        if st.tzinfo is None:
-            st = st.replace(tzinfo=pytz.utc)
-        local_st = st.astimezone(local_tz)
+        if hasattr(st, "tzinfo") and st.tzinfo is None:
+            local_st = st.replace(tzinfo=timezone.utc).astimezone()
+        elif hasattr(st, "astimezone"):
+            local_st = st.astimezone()
+        else:
+            local_st = st
 
         count = s.get("total_anomalies", 0)
         high_risk = s.get("high_risk", 0)
@@ -220,7 +218,7 @@ async def get_flow_volume(current_user: User = Depends(get_current_user)):
             if len(session_items) >= 5:
                 break
             if preset["filename"].lower() not in seen_files:
-                fake_time = (now_dt - timedelta(minutes=preset["offset_min"])).astimezone(local_tz)
+                fake_time = (now_dt - timedelta(minutes=preset["offset_min"])).astimezone()
                 session_items.append({
                     "start_ts": fake_time,
                     "filename": preset["filename"],

@@ -154,14 +154,32 @@ class AsyncCollection:
             self.docs = self.docs[-10000:]
         return type("InsertManyResult", (), {"inserted_ids": res_ids})()
 
-    def find(self, filter_dict=None, *args, **kwargs):
+    def find(self, filter_dict=None, *args, sort=None, **kwargs):
         res = [d for d in self.docs if _matches_filter(d, filter_dict)]
-        return AsyncCursor(res)
+        c = AsyncCursor(res)
+        if sort:
+            if isinstance(sort, list) and sort:
+                c.sort(sort[0][0], sort[0][1])
+            elif isinstance(sort, str):
+                c.sort(sort)
+        return c
 
-    async def find_one(self, filter_dict=None, *args, **kwargs):
-        c = self.find(filter_dict)
+    async def find_one(self, filter_dict=None, *args, sort=None, **kwargs):
+        c = self.find(filter_dict, sort=sort)
         items = await c.to_list(1)
         return items[0] if items else None
+
+    async def distinct(self, field, filter_dict=None):
+        docs = [d for d in self.docs if _matches_filter(d, filter_dict)] if filter_dict else self.docs
+        vals = set()
+        for d in docs:
+            v = d.get(field)
+            if v is not None:
+                if isinstance(v, list):
+                    vals.update(v)
+                else:
+                    vals.add(v)
+        return list(vals)
 
     async def update_one(self, filter_dict, update_dict, upsert=False):
         for d in self.docs:
