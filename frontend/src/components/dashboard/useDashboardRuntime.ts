@@ -97,7 +97,7 @@ export function useDashboardRuntime() {
           process.env.NEXT_PUBLIC_API_URL ||
           (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
             ? "http://127.0.0.1:8000"
-            : "");
+            : "https://zerobreachai-backend1.onrender.com");
       }
       if (typeof (window as any).__ZB_CLEANUP_3D__ === "function") {
         (window as any).__ZB_CLEANUP_3D__();

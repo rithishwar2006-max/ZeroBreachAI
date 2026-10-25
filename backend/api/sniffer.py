@@ -707,8 +707,9 @@ async def scan_dataset_stream(
     """
     import json
     import time
+    data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data'))
     dataset_base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '2017_improved'))
-    sample_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'frontend', 'public', 'sample_threat_traffic.csv'))
+    sample_path = os.path.join(data_dir, 'sample_threat_traffic.csv')
 
     target_file = None
     clean_name = os.path.basename(dataset)
@@ -717,17 +718,19 @@ async def scan_dataset_stream(
     # 1. Custom uploaded file in backend/uploads/
     if os.path.exists(uploaded_path):
         target_file = uploaded_path
-    # 2. Curated Evaluator benchmark
-    elif "sample" in dataset.lower():
+    # 2. Direct match in backend/data/ (cloud deployed datasets)
+    elif os.path.exists(os.path.join(data_dir, clean_name)):
+        target_file = os.path.join(data_dir, clean_name)
+    # 3. Curated Evaluator benchmark
+    elif "sample" in dataset.lower() and os.path.exists(sample_path):
         target_file = sample_path
-    # 3. CICIDS2017 benchmark dataset
+    # 4. CICIDS2017 benchmark dataset in root (local dev)
+    elif os.path.exists(os.path.join(dataset_base, clean_name)):
+        target_file = os.path.join(dataset_base, clean_name)
     else:
-        candidate = os.path.join(dataset_base, clean_name)
-        if os.path.exists(candidate):
-            target_file = candidate
-        else:
-            friday = os.path.join(dataset_base, "friday.csv")
-            target_file = friday if os.path.exists(friday) else sample_path
+        # Fallback to any available dataset in backend/data/
+        friday_in_data = os.path.join(data_dir, 'friday.csv')
+        target_file = friday_in_data if os.path.exists(friday_in_data) else sample_path
 
     if not target_file or not os.path.exists(target_file):
         raise HTTPException(status_code=404, detail=f"Dataset {dataset} not found.")

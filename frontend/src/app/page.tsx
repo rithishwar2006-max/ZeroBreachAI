@@ -163,10 +163,10 @@ export default function LoginPage() {
     setIsAuthenticating(true);
     setAuthError(null);
 
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "https://zerobreachai-backend1.onrender.com";
 
     if (isDemo) {
-      localStorage.setItem("token", "demo-token-" + Date.now());
+      localStorage.setItem("token", "demo-token-" + (username || "admin"));
       localStorage.setItem("role", selectedRole || "admin");
       localStorage.setItem("username", username || "admin");
       localStorage.setItem("is_demo_mode", "true");
@@ -181,7 +181,7 @@ export default function LoginPage() {
       formData.append("password", password);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
 
       const response = await fetch(`${apiBase}/api/auth/login`, {
         method: "POST",
@@ -209,7 +209,7 @@ export default function LoginPage() {
       // If deployed backend is cold-starting or offline, auto-enter interactive portfolio preview
       setAuthError("Live backend initializing... Launching instant portfolio preview.");
       setTimeout(() => {
-        localStorage.setItem("token", "demo-token-" + Date.now());
+        localStorage.setItem("token", "demo-token-" + (username || "admin"));
         localStorage.setItem("role", selectedRole || "admin");
         localStorage.setItem("username", username || "admin");
         localStorage.setItem("is_demo_mode", "true");

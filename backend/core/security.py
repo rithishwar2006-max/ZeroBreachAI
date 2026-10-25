@@ -52,8 +52,12 @@ def get_current_user(
     # Support demo fallback token if saved in localStorage
     if token.startswith("demo-token"):
         parts = token.split("-")
-        requested_user = parts[2] if len(parts) > 2 else "admin"
+        requested_user = parts[2] if len(parts) > 2 and not parts[2].isdigit() else "admin"
+        from api.auth import seed_demo_users
         user = db.query(User).filter(User.username == requested_user).first()
+        if not user:
+            seed_demo_users(db)
+            user = db.query(User).filter(User.username == requested_user).first()
         if not user:
             user = db.query(User).filter(User.username == "admin").first()
         if user:
@@ -67,6 +71,10 @@ def get_current_user(
     except Exception:
         raise credentials_exception
     user = db.query(User).filter(User.username == username).first()
+    if user is None:
+        from api.auth import seed_demo_users
+        seed_demo_users(db)
+        user = db.query(User).filter(User.username == username).first()
     if user is None:
         raise credentials_exception
     return user

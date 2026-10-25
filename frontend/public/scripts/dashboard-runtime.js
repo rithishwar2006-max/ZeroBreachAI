@@ -3,7 +3,7 @@ document.documentElement.classList.add('js');
 
   // Dynamic API URL Helper for Production Deployments & Local Dev
   window.getApiBase = function() {
-    if (window.__API_BASE__) return window.__API_BASE__;
+    if (window.__API_BASE__ && window.__API_BASE__ !== '') return window.__API_BASE__;
     try {
       var custom = localStorage.getItem('API_BASE_URL');
       if (custom) return custom;
@@ -11,13 +11,30 @@ document.documentElement.classList.add('js');
     if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
       return 'http://127.0.0.1:8000';
     }
-    return '';
+    return 'https://zerobreachai-backend1.onrender.com';
   };
   window.apiUrl = function(endpoint) {
     var base = window.getApiBase();
     if (!base) return endpoint;
     return base.replace(/\/+$/, '') + '/' + endpoint.replace(/^\/+/, '');
   };
+
+  // Real-time Hero Latency Monitor
+  function updateHeroLatency() {
+    if (typeof window === 'undefined') return;
+    var t0 = performance.now();
+    fetch(window.apiUrl('/health')).then(function(res) {
+      if (res.ok) {
+        var ms = Math.max(1, Math.round(performance.now() - t0));
+        var el = document.getElementById('hero-telem-latency');
+        if (el) el.textContent = ms + 'ms';
+      }
+    }).catch(function(){});
+  }
+  if (typeof window !== 'undefined') {
+    setTimeout(updateHeroLatency, 800);
+    setInterval(updateHeroLatency, 5000);
+  }
 
 
   // Single global 3D registry and cleanup manager
