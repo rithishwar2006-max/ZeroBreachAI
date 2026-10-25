@@ -1,12 +1,16 @@
-import sys, traceback
+import os, sys, traceback
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import engine, Base, SessionLocal
+from database import engine as db_engine, Base, SessionLocal as db_SessionLocal
 import models.user  # to ensure models are registered
 from api import auth, dashboard, sniffer, users
 from api.auth import seed_demo_users
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-# Create database tables and seed initial users
+# Create database tables and seed initial users with automatic SQLite fallback
+engine = db_engine
+SessionLocal = db_SessionLocal
 try:
     Base.metadata.create_all(bind=engine)
     _db = SessionLocal()
@@ -14,7 +18,15 @@ try:
     _db.close()
     print("[OK] Database tables created and demo users seeded.")
 except Exception as e:
-    print(f"[WARN] Database initialization warning: {e}")
+    print(f"[WARN] Primary database initialization warning: {e}. Switching to embedded SQLite!")
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "app.db"))
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+    _db = SessionLocal()
+    seed_demo_users(_db)
+    _db.close()
+    print(f"[OK] Fallback SQLite ready and seeded at {db_path}.")
 
 app = FastAPI(
     title="ZeroBreach AI",
@@ -46,16 +58,16 @@ async def health_check():
 
 @app.get("/api/debug-status")
 def debug_status():
-    from database import engine, settings
+    from database import settings
     res = {
         "engine": str(engine.url) if engine else None,
         "is_sqlite": "sqlite" in str(engine.url) if engine else False,
-        "commit": "6a9d3e2-debug",
+        "commit": "final-resilient-v3",
     }
     try:
-        from database import SessionLocal
         from models.user import User
         db = SessionLocal()
+        seed_demo_users(db)
         users_list = [u.username for u in db.query(User).all()]
         db.close()
         res["users"] = users_list

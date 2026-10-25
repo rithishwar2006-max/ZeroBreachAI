@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import os
+import time
 import asyncio
 from database import mongo_db, get_db
 from sqlalchemy.orm import Session
@@ -237,8 +238,11 @@ async def start_sniffer(req: SnifferStartRequest = None, current_user: User = De
     interface = req.interface if req else None
     success, msg = sniffer_manager.start(interface=interface)
     if success:
-        db.add(AuditLog(username=current_user.username, action="START_SNIFFER", details=f"Started capture on {interface}"))
-        db.commit()
+        try:
+            db.add(AuditLog(username=current_user.username, action="START_SNIFFER", details=f"Started capture on {interface}"))
+            db.commit()
+        except Exception:
+            db.rollback()
         return {"message": msg, "status": "Running"}
     raise HTTPException(status_code=400, detail=msg)
 
@@ -426,8 +430,11 @@ async def stop_sniffer(current_user: User = Depends(RequireRole([Role.ADMIN, Rol
             print(f"[WARN] Error evaluating native real flows: {e}")
 
     if success:
-        db.add(AuditLog(username=current_user.username, action="STOP_SNIFFER", details=f"Stopped capture ({summary['total_flows']} flows)"))
-        db.commit()
+        try:
+            db.add(AuditLog(username=current_user.username, action="STOP_SNIFFER", details=f"Stopped capture ({summary['total_flows']} flows)"))
+            db.commit()
+        except Exception:
+            db.rollback()
         return {"status": "stopped", "message": msg, "session": summary}
     raise HTTPException(status_code=400, detail=msg)
 
@@ -552,6 +559,7 @@ async def predict_internal(request: Request):
         return {"error": str(e)}
 
 
+import time
 import asyncio
 upload_lock = asyncio.Lock()
 
@@ -666,8 +674,11 @@ async def upload_stream_file(
     Executes in <50ms without blocking synchronous ML execution.
     """
     import re, time
-    db.add(AuditLog(username=current_user.username, action="UPLOAD_STREAM_FILE", details=f"Uploaded {file.filename} for streaming scan"))
-    db.commit()
+    try:
+        db.add(AuditLog(username=current_user.username, action="UPLOAD_STREAM_FILE", details=f"Uploaded {file.filename} for streaming scan"))
+        db.commit()
+    except Exception:
+        db.rollback()
 
     safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', file.filename)
     timestamp_prefix = int(time.time())

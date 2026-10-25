@@ -42,16 +42,76 @@ def get_db():
 # -------------------------------------------------------------
 # 2. In-Memory Mock MongoDB for Zero-Dependency Cloud Operation
 # -------------------------------------------------------------
+def _matches_filter(doc, filter_dict):
+    """
+    Evaluates MongoDB query syntax including operators ($ne, $in, $nin, $gte, $gt, $lte, $lt, $exists, $or, $and).
+    """
+    if not filter_dict:
+        return True
+    for k, v in filter_dict.items():
+        if k == "$or" and isinstance(v, list):
+            if not any(_matches_filter(doc, sub) for sub in v):
+                return False
+            continue
+        if k == "$and" and isinstance(v, list):
+            if not all(_matches_filter(doc, sub) for sub in v):
+                return False
+            continue
+        if str(k).startswith("$"):
+            continue
+
+        val = doc.get(k)
+        if isinstance(v, dict):
+            for op, op_val in v.items():
+                if op == "$ne" and val == op_val:
+                    return False
+                elif op == "$in" and val not in op_val:
+                    return False
+                elif op == "$nin" and val in op_val:
+                    return False
+                elif op == "$gte" and not (val is not None and val >= op_val):
+                    return False
+                elif op == "$gt" and not (val is not None and val > op_val):
+                    return False
+                elif op == "$lte" and not (val is not None and val <= op_val):
+                    return False
+                elif op == "$lt" and not (val is not None and val < op_val):
+                    return False
+                elif op == "$exists":
+                    exists = (k in doc and doc[k] is not None)
+                    if exists != bool(op_val):
+                        return False
+        else:
+            if val != v:
+                return False
+    return True
+
+
 class AsyncCursor:
     def __init__(self, items):
         self._items = list(items)
         self._index = 0
 
-    def sort(self, *args, **kwargs):
+    def sort(self, key_or_list, direction=1):
+        field = key_or_list
+        desc = (direction == -1)
+        if isinstance(key_or_list, list) and key_or_list:
+            field = key_or_list[0][0]
+            desc = (key_or_list[0][1] == -1)
+        try:
+            self._items.sort(key=lambda d: d.get(field) or 0, reverse=desc)
+        except Exception:
+            pass
         return self
 
     def limit(self, n):
-        self._items = self._items[:n]
+        if n is not None:
+            self._items = self._items[:n]
+        return self
+
+    def skip(self, n):
+        if n is not None:
+            self._items = self._items[n:]
         return self
 
     async def to_list(self, length=None):
@@ -75,17 +135,27 @@ class AsyncCollection:
         self.docs = []
 
     async def insert_one(self, doc):
-        self.docs.append(dict(doc))
-        return type("InsertResult", (), {"inserted_id": len(self.docs)})()
+        d = dict(doc)
+        if "_id" not in d:
+            d["_id"] = len(self.docs) + 1
+        self.docs.append(d)
+        return type("InsertResult", (), {"inserted_id": d["_id"]})()
 
     async def insert_many(self, docs):
-        self.docs.extend([dict(d) for d in docs])
-        return type("InsertManyResult", (), {"inserted_ids": list(range(len(docs)))})()
+        res_ids = []
+        for doc in docs:
+            d = dict(doc)
+            if "_id" not in d:
+                d["_id"] = len(self.docs) + 1
+            self.docs.append(d)
+            res_ids.append(d["_id"])
+        # Keep collection bounded to prevent runaway memory on prolonged runs
+        if len(self.docs) > 10000:
+            self.docs = self.docs[-10000:]
+        return type("InsertManyResult", (), {"inserted_ids": res_ids})()
 
     def find(self, filter_dict=None, *args, **kwargs):
-        res = list(self.docs)
-        if filter_dict:
-            res = [d for d in res if all(d.get(k) == v for k, v in filter_dict.items() if not str(k).startswith("$"))]
+        res = [d for d in self.docs if _matches_filter(d, filter_dict)]
         return AsyncCursor(res)
 
     async def find_one(self, filter_dict=None, *args, **kwargs):
@@ -95,7 +165,7 @@ class AsyncCollection:
 
     async def update_one(self, filter_dict, update_dict, upsert=False):
         for d in self.docs:
-            if all(d.get(k) == v for k, v in filter_dict.items() if not str(k).startswith("$")):
+            if _matches_filter(d, filter_dict):
                 if "$set" in update_dict:
                     d.update(update_dict["$set"])
                 return
@@ -103,19 +173,23 @@ class AsyncCollection:
             new_doc = dict(filter_dict) if filter_dict else {}
             if "$set" in update_dict:
                 new_doc.update(update_dict["$set"])
+            if "_id" not in new_doc:
+                new_doc["_id"] = len(self.docs) + 1
             self.docs.append(new_doc)
 
     async def delete_many(self, filter_dict=None):
         if not filter_dict:
             self.docs.clear()
         else:
-            self.docs = [d for d in self.docs if not all(d.get(k) == v for k, v in filter_dict.items() if not str(k).startswith("$"))]
+            self.docs = [d for d in self.docs if not _matches_filter(d, filter_dict)]
 
     async def count_documents(self, filter_dict=None):
-        return len(self.docs)
+        if not filter_dict:
+            return len(self.docs)
+        return len([d for d in self.docs if _matches_filter(d, filter_dict)])
 
     def aggregate(self, pipeline):
-        return AsyncCursor(self.docs[-10:])
+        return AsyncCursor(self.docs[-20:])
 
 
 class AsyncMockDatabase:
@@ -137,7 +211,7 @@ class AsyncMockDatabase:
 mongo_db = None
 traffic_collection = None
 
-# Only attempt real MongoDB if a custom remote URI is provided
+# Only attempt real MongoDB if a custom remote URI is provided (not localhost)
 if settings.MONGO_URI or (settings.MONGO_SERVER != "localhost" and settings.MONGO_SERVER != "127.0.0.1"):
     try:
         mongo_client = AsyncIOMotorClient(settings.MONGO_DATABASE_URI, serverSelectionTimeoutMS=2000)

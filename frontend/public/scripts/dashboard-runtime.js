@@ -473,7 +473,7 @@ document.documentElement.classList.add('js');
       }
 
       // High-speed stream with zero artificial delay
-      const streamUrl = `${window.apiUrl("/")}/api/sniffer/scan-stream?dataset=${encodeURIComponent(targetDataset)}&chunk_size=${chunkSize}&max_flows=${maxFlows}&delay_ms=0&token=${encodeURIComponent(token)}`;
+      const streamUrl = window.apiUrl('/api/sniffer/scan-stream?dataset=' + encodeURIComponent(targetDataset) + '&chunk_size=' + chunkSize + '&max_flows=' + maxFlows + '&delay_ms=0&token=' + encodeURIComponent(token));
 
       if (eventSource) eventSource.close();
       eventSource = new EventSource(streamUrl);
@@ -628,6 +628,11 @@ document.documentElement.classList.add('js');
           } else if (data.status !== 'Running' && capturing) {
             capturing = false;
             updateUIState();
+          }
+          if (capturing && data.session && data.session.flows && data.session.flows.length > 0) {
+            if (typeof renderLogItems === 'function') {
+              renderLogItems(data.session.flows.slice(0, window.visibleLogs || 15));
+            }
           }
         }
       } catch (e) {
