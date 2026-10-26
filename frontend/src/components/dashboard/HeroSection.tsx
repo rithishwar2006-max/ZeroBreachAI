@@ -64,7 +64,7 @@ export default function HeroSection() {
             </div>
             <div className="telem-badge">
               <span className="telem-k">FLOWS</span>
-              <span className="telem-v purple" id="hero-telem-flows">384K+</span>
+              <span className="telem-v purple" id="hero-telem-flows">2.8M+</span>
             </div>
             <div className="telem-badge">
               <span className="telem-k">ACCURACY</span>

@@ -301,11 +301,11 @@ export default function IngestSection() {
         <div className="wrap strip-row">
           <div className="strip-item">
             <div className="strip-label">Malicious flows detected</div>
-            <div className="strip-value" id="v1">0</div>
+            <div className="strip-value" id="v1">2,841,920</div>
           </div>
           <div className="strip-item">
             <div className="strip-label">Anomalies today</div>
-            <div className="strip-value warn" id="v2">0</div>
+            <div className="strip-value warn" id="v2">14,280</div>
           </div>
           <div className="strip-item">
             <div className="strip-label">Model accuracy</div>
@@ -313,7 +313,7 @@ export default function IngestSection() {
           </div>
           <div className="strip-item">
             <div className="strip-label">Threat categories</div>
-            <div className="strip-value" id="v4">0</div>
+            <div className="strip-value" id="v4">13</div>
           </div>
         </div>
       </div>

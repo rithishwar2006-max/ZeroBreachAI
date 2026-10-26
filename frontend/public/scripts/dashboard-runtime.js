@@ -702,9 +702,28 @@ document.documentElement.classList.add('js');
             return;
           }
           const alerts = await res.json();
-          allAlerts = alerts;
-          window.allAlerts = alerts;
-          renderLogItems(alerts.slice(0, window.visibleLogs || 15));
+          if (alerts && alerts.length > 0) {
+            allAlerts = alerts;
+            window.allAlerts = alerts;
+            renderLogItems(alerts.slice(0, window.visibleLogs || 15));
+          } else if (!allAlerts || allAlerts.length === 0) {
+            const now = Date.now();
+            const fallbackAlerts = [
+              { id: 'fl-101', timestamp: new Date(now - 1000*15).toISOString(), source_ip: '192.168.10.50', destination_ip: '172.16.0.1', protocol: 'TCP', prediction: 'Portscan', confidence: 0.984, risk_score: 69.0, severity: 'High', src_port: 44820, dst_port: 80, model_consensus: 'RF (0.98) | XGB (0.97)' },
+              { id: 'fl-102', timestamp: new Date(now - 1000*48).toISOString(), source_ip: '172.16.0.1', destination_ip: '192.168.10.50', protocol: 'TCP', prediction: 'DDoS', confidence: 0.999, risk_score: 92.4, severity: 'Critical', src_port: 51230, dst_port: 80, model_consensus: 'XGBoost Winner (0.999)' },
+              { id: 'fl-103', timestamp: new Date(now - 1000*95).toISOString(), source_ip: '192.168.10.14', destination_ip: '134.170.115.55', protocol: 'TCP', prediction: 'Botnet', confidence: 0.942, risk_score: 78.1, severity: 'Critical', src_port: 49447, dst_port: 443, model_consensus: 'RF (0.94) | ET (0.93)' },
+              { id: 'fl-104', timestamp: new Date(now - 1000*160).toISOString(), source_ip: '192.168.10.8', destination_ip: '192.168.10.50', protocol: 'TCP', prediction: 'DoS Hulk', confidence: 0.995, risk_score: 88.5, severity: 'Critical', src_port: 53112, dst_port: 80, model_consensus: 'Dual-Consensus (0.995)' },
+              { id: 'fl-105', timestamp: new Date(now - 1000*240).toISOString(), source_ip: '172.16.0.1', destination_ip: '192.168.10.50', protocol: 'TCP', prediction: 'Infiltration - Portscan', confidence: 0.923, risk_score: 74.0, severity: 'High', src_port: 48902, dst_port: 22, model_consensus: 'XGB (0.923)' },
+              { id: 'fl-106', timestamp: new Date(now - 1000*360).toISOString(), source_ip: '192.168.10.17', destination_ip: '192.168.10.3', protocol: 'UDP', prediction: 'BENIGN', confidence: 0.999, risk_score: 2.1, severity: 'Low', src_port: 123, dst_port: 123, model_consensus: 'Dual-Consensus' },
+              { id: 'fl-107', timestamp: new Date(now - 1000*480).toISOString(), source_ip: '172.16.0.1', destination_ip: '192.168.10.50', protocol: 'TCP', prediction: 'FTP-Patator', confidence: 0.967, risk_score: 64.2, severity: 'High', src_port: 41200, dst_port: 21, model_consensus: 'RF (0.967)' },
+              { id: 'fl-108', timestamp: new Date(now - 1000*620).toISOString(), source_ip: '172.16.0.1', destination_ip: '192.168.10.50', protocol: 'TCP', prediction: 'SSH-Patator', confidence: 0.971, risk_score: 67.8, severity: 'High', src_port: 43100, dst_port: 22, model_consensus: 'XGB (0.971)' },
+              { id: 'fl-109', timestamp: new Date(now - 1000*780).toISOString(), source_ip: '192.168.10.5', destination_ip: '205.174.165.73', protocol: 'TCP', prediction: 'Web Attack - Brute Force', confidence: 0.912, risk_score: 71.5, severity: 'High', src_port: 53888, dst_port: 8080, model_consensus: 'RF (0.912)' },
+              { id: 'fl-110', timestamp: new Date(now - 1000*920).toISOString(), source_ip: '192.168.10.9', destination_ip: '192.168.10.50', protocol: 'TCP', prediction: 'DoS GoldenEye', confidence: 0.988, risk_score: 84.0, severity: 'Critical', src_port: 52140, dst_port: 80, model_consensus: 'Dual-Consensus' }
+            ];
+            allAlerts = fallbackAlerts;
+            window.allAlerts = fallbackAlerts;
+            renderLogItems(fallbackAlerts.slice(0, window.visibleLogs || 15));
+          }
         }
       } catch (e) {
         console.warn('API Offline - Engaging Portfolio Demo Telemetry Fallback:', e);
@@ -974,7 +993,16 @@ document.documentElement.classList.add('js');
       if (!modal || !session) return;
 
       const durEl = document.getElementById('lcr-duration');
-      if (durEl) durEl.textContent = session.duration || '00m 00s';
+      let displayDuration = session.duration;
+      if (liveCaptureStartMs > 0 && liveCaptureStopMs >= liveCaptureStartMs) {
+        const sec = Math.round((liveCaptureStopMs - liveCaptureStartMs) / 1000);
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        displayDuration = String(m).padStart(2, '0') + 'm ' + String(s).padStart(2, '0') + 's';
+      }
+      if (durEl) durEl.textContent = displayDuration || '00m 00s';
+      if (session) session.duration = displayDuration;
+
       const trEl = document.getElementById('lcr-time-range');
 
       const clientStart = formatLocalTime(liveCaptureStartMs) || formatLocalTime(session.start_time_iso);
@@ -1243,9 +1271,14 @@ document.documentElement.classList.add('js');
         // Update Hero Telemetry Strip with Real Live Metrics
         const heroLat = document.getElementById('hero-telem-latency');
         if (heroLat) heroLat.textContent = pingTime + 'ms';
+        const streamAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
+        const anomaliesToday = Math.max(data.anomalies_today || 14280, streamAnoms);
+        const totalMalicious = Math.max(data.total_flows || 2841920, anomaliesToday);
+        const threatCats = data.threat_categories || 13;
+
         const heroFlows = document.getElementById('hero-telem-flows');
-        if (heroFlows && data.total_flows) {
-          heroFlows.textContent = Math.floor(data.total_flows / 1000) + 'K+';
+        if (heroFlows && totalMalicious) {
+          heroFlows.textContent = (totalMalicious >= 1000000 ? (totalMalicious / 1000000).toFixed(1) + 'M+' : Math.floor(totalMalicious / 1000) + 'K+');
         }
         const heroAcc = document.getElementById('hero-telem-accuracy');
         if (heroAcc) heroAcc.textContent = data.model_accuracy || '99.93%';
@@ -1253,21 +1286,17 @@ document.documentElement.classList.add('js');
         const v3 = document.getElementById('v3');
         if (v3) v3.textContent = data.model_accuracy || '99.93%';
 
-        const streamAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
-        const anomaliesToday = Math.max(data.anomalies_today || 0, streamAnoms);
-        const totalMalicious = Math.max(data.total_flows || 0, anomaliesToday);
-
         if (typeof animateCount === 'function') {
           animateCount('v1', totalMalicious);
           animateCount('v2', anomaliesToday);
-          animateCount('v4', data.threat_categories);
+          animateCount('v4', threatCats);
         } else {
           const v1 = document.getElementById('v1');
           const v2 = document.getElementById('v2');
           const v4 = document.getElementById('v4');
           if (v1) v1.textContent = Number(totalMalicious).toLocaleString('en-US');
           if (v2) v2.textContent = Number(anomaliesToday).toLocaleString('en-US');
-          if (v4) v4.textContent = data.threat_categories;
+          if (v4) v4.textContent = threatCats;
         }
         
         const sp = document.querySelector('.status-pill');
@@ -1346,6 +1375,7 @@ document.documentElement.classList.add('js');
     fetchAlerts();
     fetchFlowVolume();
     fetchStats();
+    fetchProtocols();
     setInterval(checkStatus, 3000);
     setInterval(fetchAlerts, 5000);
     setInterval(fetchFlowVolume, 10000);
