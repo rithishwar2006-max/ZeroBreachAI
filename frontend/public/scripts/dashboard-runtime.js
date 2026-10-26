@@ -767,6 +767,15 @@ document.documentElement.classList.add('js');
         const riskBg = isCrit ? 'rgba(255, 0, 85, 0.12)' : (isElev ? 'rgba(245, 158, 11, 0.12)' : 'rgba(0, 200, 212, 0.12)');
         const riskBorder = isCrit ? 'rgba(255, 0, 85, 0.35)' : (isElev ? 'rgba(245, 158, 11, 0.35)' : 'rgba(0, 200, 212, 0.35)');
 
+        let displayTime = alert.timestamp || '';
+        const iso = alert.timestamp_iso || alert.timestamp;
+        if (iso && typeof iso === 'string' && (iso.includes('T') || iso.includes('-'))) {
+          const d = new Date(iso);
+          if (!isNaN(d.getTime())) {
+            displayTime = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+          }
+        }
+
         row.innerHTML = 
           '<div style="display:flex; align-items:center; gap:10px; width:250px; flex-shrink:0;">' +
             '<span class="log-dot" style="background:' + color + '; box-shadow:0 0 8px ' + color + ';"></span>' +
@@ -779,7 +788,7 @@ document.documentElement.classList.add('js');
             '<span style="color:#f8fafc;">' + (alert.target_ip || '0.0.0.0') + '</span>' +
           '</div>' +
           '<div class="log-time" style="display:flex; align-items:center; gap:12px; font-family:var(--mono); font-size:11px; color:#64748b;">' +
-            '<span>' + (alert.timestamp || '') + '</span>' +
+            '<span>' + displayTime + '</span>' +
           '</div>';
 
         const btn = document.createElement('button');
@@ -853,9 +862,18 @@ document.documentElement.classList.add('js');
           const tierName = isCrit ? 'CRITICAL' : (isElev ? 'ELEVATED' : 'NOMINAL');
           const riskBg = isCrit ? 'rgba(255,0,85,0.12)' : (isElev ? 'rgba(245,158,11,0.12)' : 'rgba(0,200,212,0.12)');
 
+          let modalTime = a.timestamp || '--';
+          const mIso = a.timestamp_iso || a.timestamp;
+          if (mIso && typeof mIso === 'string' && (mIso.includes('T') || mIso.includes('-'))) {
+            const d = new Date(mIso);
+            if (!isNaN(d.getTime())) {
+              modalTime = d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+            }
+          }
+
           row.innerHTML =
             '<td style="padding: 11px 10px; color: #64748b;">' + (start + idx + 1) + '</td>' +
-            '<td style="padding: 11px 10px; color: #94a3b8; white-space: nowrap;">' + (a.timestamp || '--') + '</td>' +
+            '<td style="padding: 11px 10px; color: #94a3b8; white-space: nowrap;">' + modalTime + '</td>' +
             '<td style="padding: 11px 10px; font-weight: 700; color: #f8fafc;"><span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:' + color + '; margin-right:6px; box-shadow:0 0 6px ' + color + ';"></span>' + (a.type || 'Flow') + '</td>' +
             '<td style="padding: 11px 10px;"><span style="color:' + color + '; background:' + riskBg + '; border:1px solid ' + color + '44; border-radius:4px; padding:2px 7px; font-weight:700; font-size:10px;">' + tierName + ' (' + (a.risk_score || 0) + ')</span></td>' +
             '<td style="padding: 11px 10px; color: #cbd5e1;"><span style="color:#f8fafc;">' + (a.source_ip || '') + '</span> <span style="color:#00c8d4;">&rarr;</span> <span style="color:#f8fafc;">' + (a.target_ip || '') + '</span></td>' +
@@ -1206,8 +1224,20 @@ document.documentElement.classList.add('js');
                 ? '<div style="color:#38bdf8; font-size:11px; font-weight:700; letter-spacing:0.02em; margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="' + b.filename + '">' + b.filename + '</div>'
                 : '');
               
-            const dateText = b.date || (b.label ? b.label.split(', ')[0] : '');
-            const timeText = b.time || (b.label ? b.label.split(', ')[1] : '');
+            let dateText = b.date || (b.label ? b.label.split(', ')[0] : '');
+            let timeText = b.time || (b.label ? b.label.split(', ')[1] : '');
+
+            // Convert server ISO timestamp to user's local browser timezone
+            if (b.start_time_iso) {
+              const d = new Date(b.start_time_iso);
+              if (!isNaN(d.getTime())) {
+                dateText = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                timeText = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+                b.label = dateText + ', ' + timeText;
+                b.date = dateText;
+                b.time = timeText;
+              }
+            }
 
             lbl.innerHTML = fileBadge +
                             '<div style="color:#ffffff; font-weight:700; font-size:12px; letter-spacing:0.02em;">' + dateText + '</div>' +
@@ -1223,13 +1253,12 @@ document.documentElement.classList.add('js');
       } catch(e) {
         console.warn('Flow volume offline - Generating Benchmark Flow Wave:', e);
         const buckets = [
-          { label: 'Monday, 10:00', count: 0, height: 12, spike: false, filename: 'monday.csv' },
-          { label: 'Tuesday, 11:30', count: 1840, height: 28, spike: false, filename: 'tuesday.csv' },
-          { label: 'Wednesday, 14:15', count: 17200, height: 52, spike: false, filename: 'wednesday.csv' },
-          { label: 'Thursday, 15:45', count: 8420, height: 40, spike: false, filename: 'thursday.csv' },
-          { label: 'Friday, 13:00', count: 4800, height: 35, spike: false, filename: 'friday.csv' },
-          { label: 'Friday, 16:30', count: 259207, height: 98, spike: true, filename: 'friday.csv' },
-          { label: 'Live Session, 17:00', count: 240, height: 20, spike: false, is_live: true }
+          { label: 'Monday, 10:00 AM', count: 0, height: 12, spike: false, filename: 'monday.csv' },
+          { label: 'Tuesday, 11:30 AM', count: 1840, height: 28, spike: false, filename: 'tuesday.csv' },
+          { label: 'Wednesday, 02:15 PM', count: 4120, height: 48, spike: false, filename: 'wednesday.csv' },
+          { label: 'Thursday, 03:45 PM', count: 1950, height: 30, spike: false, filename: 'thursday.csv' },
+          { label: 'Friday, 04:30 PM', count: 7003, height: 78, spike: true, filename: 'friday.csv' },
+          { label: 'Live Session, 05:00 PM', count: 240, height: 20, spike: false, is_live: true }
         ];
         const barsEl = document.getElementById('flow-bars');
         const labelsEl = document.getElementById('bar-labels');

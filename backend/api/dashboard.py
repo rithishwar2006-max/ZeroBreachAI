@@ -207,8 +207,10 @@ async def get_recent_alerts(current_user: User = Depends(get_current_user), skip
             
         # Format the actual timestamp from the database (convert UTC to Local time)
         alert_time = alert.get("timestamp")
+        iso_str = None
         if alert_time:
-            from datetime import timezone
+            if hasattr(alert_time, "isoformat"):
+                iso_str = alert_time.isoformat()
             if hasattr(alert_time, "tzinfo") and alert_time.tzinfo is None:
                 local_time = alert_time.replace(tzinfo=timezone.utc).astimezone()
             elif hasattr(alert_time, "astimezone"):
@@ -224,7 +226,8 @@ async def get_recent_alerts(current_user: User = Depends(get_current_user), skip
             "type": alert.get("prediction", "Unknown Anomaly"),
             "source_ip": alert.get("source_ip", "192.168.1.x"),
             "target_ip": alert.get("destination_ip", "10.0.0.x"),
-            "timestamp": time_str, 
+            "timestamp": time_str,
+            "timestamp_iso": iso_str,
             "confidence": alert.get("confidence", risk_score),
             "risk_score": alert.get("risk_score", risk_score),
             "attack_severity": alert.get("attack_severity", 80.0),
@@ -238,14 +241,15 @@ async def get_recent_alerts(current_user: User = Depends(get_current_user), skip
         for idx, base in enumerate(CURATED_BENCHMARK_ALERTS):
             if len(formatted_alerts) >= limit:
                 break
-            t = (now_dt - timedelta(seconds=base["offset_sec"])).astimezone()
+            t = now_dt - timedelta(seconds=base["offset_sec"])
             formatted_alerts.append({
                 "id": f"base-{idx + 1}",
                 "type": base["type"],
                 "source_ip": base["source_ip"],
                 "target_ip": base["target_ip"],
                 "protocol": base["protocol"],
-                "timestamp": t.strftime("%b %d, %I:%M %p"),
+                "timestamp": t.astimezone().strftime("%b %d, %I:%M %p"),
+                "timestamp_iso": t.isoformat(),
                 "confidence": base["confidence"],
                 "risk_score": base["risk_score"],
                 "attack_severity": base["attack_severity"],
@@ -300,10 +304,10 @@ async def get_flow_volume(current_user: User = Depends(get_current_user)):
     # Prepare standard reference / benchmark sessions if user has fewer than 5 sessions
     # to maintain a gorgeous 5-pillar 3D view with realistic baseline and elevated context
     reference_presets = [
-        {"filename": "monday.csv", "offset_min": 180, "total_anomalies": 0, "total_scanned": 15000, "high_risk": 0},
-        {"filename": "tuesday.csv", "offset_min": 120, "total_anomalies": 1840, "total_scanned": 45000, "high_risk": 320},
-        {"filename": "wednesday.csv", "offset_min": 75, "total_anomalies": 17200, "total_scanned": 120000, "high_risk": 4100},
-        {"filename": "thursday.csv", "offset_min": 35, "total_anomalies": 8420, "total_scanned": 80000, "high_risk": 1900},
+        {"filename": "monday.csv", "offset_min": 180, "total_anomalies": 0, "total_scanned": 10000, "high_risk": 0},
+        {"filename": "tuesday.csv", "offset_min": 120, "total_anomalies": 1840, "total_scanned": 10000, "high_risk": 320},
+        {"filename": "wednesday.csv", "offset_min": 75, "total_anomalies": 4120, "total_scanned": 10000, "high_risk": 1100},
+        {"filename": "thursday.csv", "offset_min": 35, "total_anomalies": 1950, "total_scanned": 10000, "high_risk": 450},
     ]
 
     session_items = []
@@ -326,17 +330,17 @@ async def get_flow_volume(current_user: User = Depends(get_current_user)):
         if not isinstance(st, datetime):
             st = datetime.utcnow()
         if hasattr(st, "tzinfo") and st.tzinfo is None:
-            local_st = st.replace(tzinfo=timezone.utc).astimezone()
+            utc_st = st.replace(tzinfo=timezone.utc)
         elif hasattr(st, "astimezone"):
-            local_st = st.astimezone()
+            utc_st = st.astimezone(timezone.utc)
         else:
-            local_st = st
+            utc_st = datetime.now(timezone.utc)
 
         count = s.get("total_anomalies", 0)
         high_risk = s.get("high_risk", 0)
 
         session_items.append({
-            "start_ts": local_st,
+            "start_ts": utc_st,
             "filename": display_name,
             "raw_filename": raw_fname,
             "source_type": "live_capture" if is_live else "stream",
@@ -353,7 +357,7 @@ async def get_flow_volume(current_user: User = Depends(get_current_user)):
             if len(session_items) >= 5:
                 break
             if preset["filename"].lower() not in seen_files:
-                fake_time = (now_dt - timedelta(minutes=preset["offset_min"])).astimezone()
+                fake_time = now_dt - timedelta(minutes=preset["offset_min"])
                 session_items.append({
                     "start_ts": fake_time,
                     "filename": preset["filename"],
@@ -376,6 +380,7 @@ async def get_flow_volume(current_user: User = Depends(get_current_user)):
         date_part = s["start_ts"].strftime("%b %d").replace(" 0", " ")
         time_part = s["start_ts"].strftime("%I:%M %p").lstrip("0")
         fname = s["filename"]
+        iso_str = s["start_ts"].isoformat() if hasattr(s["start_ts"], "isoformat") else str(s["start_ts"])
 
         c = s["count"]
         if max_count > 0:
@@ -390,6 +395,7 @@ async def get_flow_volume(current_user: User = Depends(get_current_user)):
             "label": f"{date_part}, {time_part}",
             "date": date_part,
             "time": time_part,
+            "start_time_iso": iso_str,
             "filename": fname,
             "source_type": s.get("source_type", "stream"),
             "is_live": s.get("is_live", False),
