@@ -1227,16 +1227,31 @@ document.documentElement.classList.add('js');
             let dateText = b.date || (b.label ? b.label.split(', ')[0] : '');
             let timeText = b.time || (b.label ? b.label.split(', ')[1] : '');
 
-            // Convert server ISO timestamp to user's local browser timezone
+            // Convert server timestamp (ISO or UTC string) to user's local browser timezone
+            let parsedDate = null;
             if (b.start_time_iso) {
               const d = new Date(b.start_time_iso);
-              if (!isNaN(d.getTime())) {
-                dateText = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-                timeText = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
-                b.label = dateText + ', ' + timeText;
-                b.date = dateText;
-                b.time = timeText;
+              if (!isNaN(d.getTime())) parsedDate = d;
+            }
+            if (!parsedDate && (b.time || b.label)) {
+              // Server times are in UTC; parse with UTC specifier so browser converts to local timezone
+              const curYear = new Date().getFullYear();
+              const datePart = b.date || (b.label ? b.label.split(', ')[0] : '');
+              const timePart = b.time || (b.label ? b.label.split(', ')[1] : '');
+              if (timePart) {
+                const testUtc = new Date(datePart + ' ' + curYear + ' ' + timePart + ' UTC');
+                if (!isNaN(testUtc.getTime())) {
+                  parsedDate = testUtc;
+                }
               }
+            }
+
+            if (parsedDate) {
+              dateText = parsedDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+              timeText = parsedDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+              b.label = dateText + ', ' + timeText;
+              b.date = dateText;
+              b.time = timeText;
             }
 
             lbl.innerHTML = fileBadge +

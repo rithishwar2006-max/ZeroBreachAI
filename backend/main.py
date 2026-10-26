@@ -59,10 +59,20 @@ async def health_check():
 @app.get("/api/debug-status")
 def debug_status():
     from database import settings
+    data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
+    sizes = {}
+    try:
+        for f in ["monday.csv", "tuesday.csv", "wednesday.csv", "thursday.csv", "friday.csv"]:
+            p = os.path.join(data_dir, f)
+            sizes[f] = os.path.getsize(p) if os.path.exists(p) else 0
+    except Exception:
+        pass
+
     res = {
         "engine": str(engine.url) if engine else None,
         "is_sqlite": "sqlite" in str(engine.url) if engine else False,
-        "commit": "final-resilient-v3",
+        "commit": "8cd8fc2-benchmark-fix",
+        "dataset_sizes": sizes,
     }
     try:
         from models.user import User
