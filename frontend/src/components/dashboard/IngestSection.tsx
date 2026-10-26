@@ -54,7 +54,7 @@ export default function IngestSection() {
                 <select id="iface" defaultValue="Wi-Fi">
                   <option value="Wi-Fi">Wi-Fi</option>
                   <option value="Ethernet">Ethernet</option>
-                  <option value="Wi-Fi">All interfaces</option>
+                  <option value="All">All interfaces</option>
                 </select>
               </div>
               <button type="button" className="btn btn-primary" id="capture-toggle">
@@ -127,34 +127,51 @@ export default function IngestSection() {
                   </div>
                 </div>
 
-                <a
-                  href="/sample_threat_traffic.csv"
-                  download="sample_threat_traffic.csv"
-                  id="download-sample-link"
-                  style={{
-                    fontSize: "11px",
-                    color: "var(--signal)",
-                    fontFamily: "var(--mono)",
-                    textDecoration: "underline",
-                    cursor: "pointer",
-                  }}
-                >
-                  📥 Download Benchmark Sample (45 Curated Flows)
-                </a>
+                <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
+                  <a
+                    href="/sample_threat_traffic.csv"
+                    download="sample_threat_traffic.csv"
+                    id="download-sample-link"
+                    style={{
+                      fontSize: "11px",
+                      color: "var(--signal)",
+                      fontFamily: "var(--mono)",
+                      textDecoration: "underline",
+                      cursor: "pointer",
+                    }}
+                  >
+                    📥 Download Quick Sample (45 Flows)
+                  </a>
+                  <a
+                    href="/sample_traffic.csv"
+                    download="sample_traffic.csv"
+                    id="download-full-sample-link"
+                    style={{
+                      fontSize: "11px",
+                      color: "#38bdf8",
+                      fontFamily: "var(--mono)",
+                      textDecoration: "underline",
+                      cursor: "pointer",
+                    }}
+                  >
+                    📥 Download Multi-Attack Sample (4,001 Flows)
+                  </a>
+                </div>
               </div>
 
               {/* Source View A: Benchmark Dataset Selector */}
               <div id="view-source-benchmark" style={{ display: "block" }}>
-                <div className="iface-select" style={{ maxWidth: "480px" }}>
+                <div className="iface-select" style={{ maxWidth: "520px" }}>
                   <label htmlFor="stream-dataset" style={{ color: "var(--text-low)", fontSize: "11px", fontFamily: "var(--mono)", marginBottom: "4px", display: "block" }}>
                     CICIDS2017 BENCHMARK SUITE
                   </label>
                   <select id="stream-dataset" defaultValue="friday.csv" style={{ width: "100%", background: "var(--panel-2)", color: "#fff", border: "1px solid var(--line-strong)", borderRadius: "6px", padding: "8px 12px", fontFamily: "var(--mono)", fontSize: "12px" }}>
-                    <option value="monday.csv">CICIDS2017: Monday (Benign Baseline Traffic)</option>
-                    <option value="tuesday.csv">CICIDS2017: Tuesday (FTP-Patator / SSH-Patator)</option>
-                    <option value="wednesday.csv">CICIDS2017: Wednesday (DoS Slowloris / GoldenEye / Hulk)</option>
-                    <option value="thursday.csv">CICIDS2017: Thursday (Web Attacks / Infiltration)</option>
-                    <option value="friday.csv">CICIDS2017: Friday (Portscan / DDoS / Botnet)</option>
+                    <option value="monday.csv">CICIDS2017: Monday (Benign Baseline Traffic - 10,000 flows)</option>
+                    <option value="tuesday.csv">CICIDS2017: Tuesday (FTP-Patator / SSH-Patator - 10,000 flows)</option>
+                    <option value="wednesday.csv">CICIDS2017: Wednesday (DoS Slowloris / GoldenEye / Hulk - 10,000 flows)</option>
+                    <option value="thursday.csv">CICIDS2017: Thursday (Web Attacks / Infiltration - 10,000 flows)</option>
+                    <option value="friday.csv">CICIDS2017: Friday (Portscan / DDoS / Botnet - 10,000 flows)</option>
+                    <option value="sample_traffic.csv">Multi-Attack Evaluation Suite (4,001 Diverse Flows)</option>
                     <option value="sample_threat_traffic.csv">Curated Benchmark (45 Balanced Flows)</option>
                   </select>
                 </div>
@@ -302,6 +319,10 @@ export default function IngestSection() {
           <div className="strip-item">
             <div className="strip-label">Malicious flows detected</div>
             <div className="strip-value" id="v1">2,841,920</div>
+          </div>
+          <div className="strip-item">
+            <div className="strip-label">Anomalies found</div>
+            <div className="strip-value" id="v-found" style={{ color: "var(--signal-bright, #00f0ff)" }}>0</div>
           </div>
           <div className="strip-item">
             <div className="strip-label">Anomalies today</div>
