@@ -750,7 +750,6 @@ document.documentElement.classList.add('js');
             window.allAlerts = fallbackAlerts;
             renderLogItems(fallbackAlerts.slice(0, window.visibleLogs || 15));
           }
-        }
       } catch (e) {
         console.warn('API Offline - Engaging Portfolio Demo Telemetry Fallback:', e);
 
@@ -1291,22 +1290,22 @@ document.documentElement.classList.add('js');
         if (typeof window.renderFlowWave === 'function') {
           window.renderFlowWave(buckets);
         }
-      } catch(e) {
-        console.warn('Flow volume offline - Generating Benchmark Flow Wave:', e);
-        const buckets = [
-          { label: 'Monday, 10:00 AM', count: 0, height: 12, spike: false, filename: 'monday.csv' },
-          { label: 'Tuesday, 11:30 AM', count: 1840, height: 28, spike: false, filename: 'tuesday.csv' },
-          { label: 'Wednesday, 02:15 PM', count: 4120, height: 48, spike: false, filename: 'wednesday.csv' },
-          { label: 'Thursday, 03:45 PM', count: 1950, height: 30, spike: false, filename: 'thursday.csv' },
-          { label: 'Friday, 04:30 PM', count: 7003, height: 78, spike: true, filename: 'friday.csv' },
-          { label: 'Live Session, 05:00 PM', count: 240, height: 20, spike: false, is_live: true }
+      } catch (err) {
+        console.warn('Flow volume fallback engage:', err);
+        const now = Date.now();
+        const fallbackBuckets = [
+          { filename: 'monday.csv', count: 0, height: 10, spike: false, label: 'Monday, 10:00 AM', start_time_iso: new Date(now - 1000 * 60 * 180).toISOString() },
+          { filename: 'tuesday.csv', count: 1841, height: 42, spike: false, label: 'Tuesday, 11:30 AM', start_time_iso: new Date(now - 1000 * 60 * 120).toISOString() },
+          { filename: 'wednesday.csv', count: 4120, height: 68, spike: true, label: 'Wednesday, 01:15 PM', start_time_iso: new Date(now - 1000 * 60 * 75).toISOString() },
+          { filename: 'thursday.csv', count: 1948, height: 44, spike: false, label: 'Thursday, 02:45 PM', start_time_iso: new Date(now - 1000 * 60 * 35).toISOString() },
+          { filename: 'friday.csv', count: 7002, height: 95, spike: true, label: 'Friday, 04:00 PM', start_time_iso: new Date(now - 1000 * 60 * 10).toISOString() }
         ];
         const barsEl = document.getElementById('flow-bars');
         const labelsEl = document.getElementById('bar-labels');
         if (barsEl && !barsEl.children.length) {
           barsEl.innerHTML = '';
           if (labelsEl) labelsEl.innerHTML = '';
-          buckets.forEach(function(b) {
+          fallbackBuckets.forEach(function(b) {
             const bar = document.createElement('div');
             bar.style.height = b.height + '%';
             bar.title = b.label + ' - ' + b.count.toLocaleString() + ' anomalies';
@@ -1322,19 +1321,6 @@ document.documentElement.classList.add('js');
             }
           });
         }
-        if (typeof window.renderFlowWave === 'function') {
-          window.renderFlowWave(buckets);
-        }
-      } catch (err) {
-        console.warn('Flow volume fallback engage:', err);
-        const now = Date.now();
-        const fallbackBuckets = [
-          { filename: 'monday.csv', count: 0, height: 10, spike: false, label: 'Monday, 10:00 AM', start_time_iso: new Date(now - 1000 * 60 * 180).toISOString() },
-          { filename: 'tuesday.csv', count: 1841, height: 42, spike: false, label: 'Tuesday, 11:30 AM', start_time_iso: new Date(now - 1000 * 60 * 120).toISOString() },
-          { filename: 'wednesday.csv', count: 4120, height: 68, spike: true, label: 'Wednesday, 01:15 PM', start_time_iso: new Date(now - 1000 * 60 * 75).toISOString() },
-          { filename: 'thursday.csv', count: 1948, height: 44, spike: false, label: 'Thursday, 02:45 PM', start_time_iso: new Date(now - 1000 * 60 * 35).toISOString() },
-          { filename: 'friday.csv', count: 7002, height: 95, spike: true, label: 'Friday, 04:00 PM', start_time_iso: new Date(now - 1000 * 60 * 10).toISOString() }
-        ];
         if (typeof window.renderFlowWave === 'function') {
           window.renderFlowWave(fallbackBuckets);
         }
