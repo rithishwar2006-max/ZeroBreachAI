@@ -317,16 +317,16 @@ export default function IngestSection() {
       <div className="strip reveal">
         <div className="wrap strip-row">
           <div className="strip-item">
-            <div className="strip-label">Malicious flows detected</div>
+            <div className="strip-label">Total anomalies detected</div>
             <div className="strip-value" id="v1">2,841,920</div>
           </div>
           <div className="strip-item">
-            <div className="strip-label">Anomalies found</div>
+            <div className="strip-label">Anomalies in current scan</div>
             <div className="strip-value" id="v-found" style={{ color: "var(--signal-bright, #00f0ff)" }}>0</div>
           </div>
           <div className="strip-item">
             <div className="strip-label">Anomalies today</div>
-            <div className="strip-value warn" id="v2">14,280</div>
+            <div className="strip-value warn" id="v2">0</div>
           </div>
           <div className="strip-item">
             <div className="strip-label">Model accuracy</div>

@@ -371,6 +371,7 @@ document.documentElement.classList.add('js');
     }
 
     function resetUI() {
+      window.__ZB_IS_SCANNING__ = false;
       scanBtn.style.display = 'inline-block';
       scanBtn.disabled = false;
       scanBtn.textContent = 'Start Streaming Scan';
@@ -468,6 +469,9 @@ document.documentElement.classList.add('js');
       totalRows = 0;
       totalAnoms = 0;
       window.__ZB_STREAM_ANOMALIES__ = 0;
+      window.__ZB_IS_SCANNING__ = true;
+      window.__ZB_PRE_SCAN_TODAY__ = typeof window.__ZB_SERVER_TODAY_ANOMS__ === 'number' ? window.__ZB_SERVER_TODAY_ANOMS__ : 0;
+      window.__ZB_PRE_SCAN_TOTAL__ = typeof window.__ZB_SERVER_TOTAL_FLOWS__ === 'number' ? window.__ZB_SERVER_TOTAL_FLOWS__ : 2841920;
       if (scannedCount) scannedCount.textContent = '0';
       if (anomCount) anomCount.textContent = '0';
       if (chunkIdEl) chunkIdEl.textContent = '#0';
@@ -524,9 +528,11 @@ document.documentElement.classList.add('js');
           const vFound = document.getElementById('v-found');
           if (vFound) vFound.textContent = totalAnoms.toLocaleString();
           const v2 = document.getElementById('v2');
-          if (v2) v2.textContent = (14280 + totalAnoms).toLocaleString();
+          const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : 0;
+          if (v2) v2.textContent = (preToday + totalAnoms).toLocaleString();
           const v1 = document.getElementById('v1');
-          if (v1) v1.textContent = (2841920 + totalAnoms).toLocaleString();
+          const preTotal = typeof window.__ZB_PRE_SCAN_TOTAL__ === 'number' ? window.__ZB_PRE_SCAN_TOTAL__ : 2841920;
+          if (v1) v1.textContent = (preTotal + totalAnoms).toLocaleString();
 
           // Smoothly throttled dashboard refresh (at most once every 1.5s to keep UI at 60 FPS)
           const now = Date.now();
@@ -589,12 +595,22 @@ document.documentElement.classList.add('js');
             if (scannedCount) scannedCount.textContent = totalRows.toLocaleString();
             if (anomCount) anomCount.textContent = totalAnoms.toLocaleString();
             if (chunkIdEl && data.total_chunks !== undefined) chunkIdEl.textContent = '#' + data.total_chunks;
+
+            try {
+              const d = new Date();
+              const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              localStorage.setItem('zb_last_scan_anoms', totalAnoms.toString());
+              localStorage.setItem('zb_last_scan_date', todayStr);
+            } catch(e) {}
+
             const vFound = document.getElementById('v-found');
             if (vFound) vFound.textContent = totalAnoms.toLocaleString();
             const v2 = document.getElementById('v2');
-            if (v2) v2.textContent = (14280 + totalAnoms).toLocaleString();
+            const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : 0;
+            if (v2) v2.textContent = (preToday + totalAnoms).toLocaleString();
             const v1 = document.getElementById('v1');
-            if (v1) v1.textContent = (2841920 + totalAnoms).toLocaleString();
+            const preTotal = typeof window.__ZB_PRE_SCAN_TOTAL__ === 'number' ? window.__ZB_PRE_SCAN_TOTAL__ : 2841920;
+            if (v1) v1.textContent = (preTotal + totalAnoms).toLocaleString();
           }
           if (statusText) {
             statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#10b981;margin-right:6px"></span>SCAN COMPLETE';
@@ -1326,23 +1342,68 @@ document.documentElement.classList.add('js');
     }
     window.fetchFlowVolume = fetchFlowVolume;
 
+    function getLocalDateString() {
+      const d = new Date();
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
     // ---- Live Stat Band Metrics ----
     async function fetchStats() {
+      const localDateStr = getLocalDateString();
+      const tzOffset = new Date().getTimezoneOffset();
+
+      // Check if calendar day transitioned (past midnight in user's timezone)
+      const lastSeenDate = localStorage.getItem('zb_stat_date');
+      if (lastSeenDate && lastSeenDate !== localDateStr) {
+        // Next day reached! Clear yesterday's scan anomalies
+        localStorage.removeItem('zb_last_scan_anoms');
+        window.__ZB_STREAM_ANOMALIES__ = 0;
+      }
+      localStorage.setItem('zb_stat_date', localDateStr);
+
       try {
         const t0 = performance.now();
-        const res = await fetch(window.apiUrl('/api/dashboard/stats'), {headers: window.getAuthHeaders()});
+        const res = await fetch(window.apiUrl('/api/dashboard/stats?client_date=' + encodeURIComponent(localDateStr) + '&tz_offset=' + tzOffset), {headers: window.getAuthHeaders()});
         const pingTime = (performance.now() - t0).toFixed(1);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
 
+        // Keep server baselines cached
+        window.__ZB_SERVER_TODAY_ANOMS__ = Number(data.anomalies_today) || 0;
+        window.__ZB_SERVER_TOTAL_FLOWS__ = Number(data.total_flows) || 2841920;
+
+        // Determine current scan anomalies:
+        let currentScanAnoms = 0;
+        if (window.__ZB_IS_SCANNING__) {
+          currentScanAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
+        } else if (localStorage.getItem('zb_last_scan_date') === localDateStr && localStorage.getItem('zb_last_scan_anoms') !== null) {
+          currentScanAnoms = parseInt(localStorage.getItem('zb_last_scan_anoms'), 10) || 0;
+        } else if (data.last_scan_anomalies !== undefined && data.anomalies_today > 0) {
+          currentScanAnoms = Number(data.last_scan_anomalies) || 0;
+        }
+
+        // Determine anomalies today (strictly for the current calendar day):
+        let anomaliesToday = Number(data.anomalies_today) || 0;
+        if (window.__ZB_IS_SCANNING__) {
+          const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : 0;
+          anomaliesToday = preToday + currentScanAnoms;
+        }
+
+        // Determine total all-time malicious flows:
+        let totalMalicious = Number(data.total_flows) || 2841920;
+        if (window.__ZB_IS_SCANNING__) {
+          const preTotal = typeof window.__ZB_PRE_SCAN_TOTAL__ === 'number' ? window.__ZB_PRE_SCAN_TOTAL__ : 2841920;
+          totalMalicious = preTotal + currentScanAnoms;
+        }
+
+        const threatCats = data.threat_categories || 13;
+
         // Update Hero Telemetry Strip with Real Live Metrics
         const heroLat = document.getElementById('hero-telem-latency');
         if (heroLat) heroLat.textContent = pingTime + 'ms';
-        const streamAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
-        const anomaliesToday = Math.max(data.anomalies_today || 14280, 14280 + streamAnoms);
-        const totalMalicious = Math.max(data.total_flows || 2841920, 2841920 + streamAnoms);
-        const threatCats = data.threat_categories || 13;
-
         const heroFlows = document.getElementById('hero-telem-flows');
         if (heroFlows && totalMalicious) {
           heroFlows.textContent = (totalMalicious >= 1000000 ? (totalMalicious / 1000000).toFixed(1) + 'M+' : Math.floor(totalMalicious / 1000) + 'K+');
@@ -1354,7 +1415,7 @@ document.documentElement.classList.add('js');
         if (v3) v3.textContent = data.model_accuracy || '99.93%';
 
         const vFound = document.getElementById('v-found');
-        if (vFound) vFound.textContent = streamAnoms.toLocaleString();
+        if (vFound) vFound.textContent = Number(currentScanAnoms).toLocaleString('en-US');
 
         if (typeof animateCount === 'function') {
           animateCount('v1', totalMalicious);
@@ -1385,7 +1446,15 @@ document.documentElement.classList.add('js');
         }
       } catch(e) {
         console.warn('Stats fetch offline - Using Benchmark Statistics:', e);
-        const streamAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
+        let currentScanAnoms = 0;
+        if (window.__ZB_IS_SCANNING__) {
+          currentScanAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
+        } else if (localStorage.getItem('zb_last_scan_date') === localDateStr && localStorage.getItem('zb_last_scan_anoms') !== null) {
+          currentScanAnoms = parseInt(localStorage.getItem('zb_last_scan_anoms'), 10) || 0;
+        }
+        const anomaliesToday = currentScanAnoms;
+        const totalMalicious = 2841920 + currentScanAnoms;
+
         const heroLat = document.getElementById('hero-telem-latency');
         if (heroLat) heroLat.textContent = '12.4ms';
         const heroFlows = document.getElementById('hero-telem-flows');
@@ -1396,19 +1465,19 @@ document.documentElement.classList.add('js');
         if (v3) v3.textContent = '99.93%';
 
         const vFound = document.getElementById('v-found');
-        if (vFound) vFound.textContent = streamAnoms.toLocaleString();
+        if (vFound) vFound.textContent = Number(currentScanAnoms).toLocaleString('en-US');
 
         if (typeof animateCount === 'function') {
-          animateCount('v1', 2841920 + streamAnoms);
-          animateCount('v2', 14280 + streamAnoms);
-          animateCount('v4', 15);
+          animateCount('v1', totalMalicious);
+          animateCount('v2', anomaliesToday);
+          animateCount('v4', 13);
         } else {
           const v1 = document.getElementById('v1');
           const v2 = document.getElementById('v2');
           const v4 = document.getElementById('v4');
-          if (v1) v1.textContent = (2841920 + streamAnoms).toLocaleString('en-US');
-          if (v2) v2.textContent = (14280 + streamAnoms).toLocaleString('en-US');
-          if (v4) v4.textContent = '15';
+          if (v1) v1.textContent = Number(totalMalicious).toLocaleString('en-US');
+          if (v2) v2.textContent = Number(anomaliesToday).toLocaleString('en-US');
+          if (v4) v4.textContent = '13';
         }
       }
     }

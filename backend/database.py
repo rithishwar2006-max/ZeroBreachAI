@@ -207,7 +207,34 @@ class AsyncCollection:
         return len([d for d in self.docs if _matches_filter(d, filter_dict)])
 
     def aggregate(self, pipeline):
-        return AsyncCursor(self.docs[-20:])
+        # Support basic $match, $group, and $count for in-memory mock mongo
+        docs = list(self.docs)
+        for stage in pipeline:
+            if "$match" in stage:
+                docs = [d for d in docs if _matches_filter(d, stage["$match"])]
+            elif "$count" in stage:
+                count_key = stage["$count"]
+                return AsyncCursor([{count_key: len(docs)}])
+            elif "$group" in stage:
+                grp = stage["$group"]
+                res_doc = {"_id": grp.get("_id")}
+                for k, v in grp.items():
+                    if k == "_id":
+                        continue
+                    if isinstance(v, dict) and "$sum" in v:
+                        sum_field = v["$sum"]
+                        if isinstance(sum_field, str) and sum_field.startswith("$"):
+                            fname = sum_field[1:]
+                            res_doc[k] = sum(int(d.get(fname, 0) or 0) for d in docs)
+                        elif isinstance(sum_field, (int, float)):
+                            res_doc[k] = len(docs) * sum_field
+                        else:
+                            res_doc[k] = len(docs)
+                    elif isinstance(v, dict) and "$first" in v:
+                        fname = v["$first"][1:] if v["$first"].startswith("$") else v["$first"]
+                        res_doc[k] = docs[0].get(fname) if docs else None
+                return AsyncCursor([res_doc])
+        return AsyncCursor(docs[-50:])
 
 
 class AsyncMockDatabase:

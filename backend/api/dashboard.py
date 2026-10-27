@@ -539,78 +539,143 @@ async def get_threat_spectrum():
 
 
 @router.get("/stats")
-async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
+async def get_dashboard_stats(
+    client_date: Optional[str] = Query(None),
+    tz_offset: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user)
+):
     """
-    Returns live summary statistics from MongoDB:
-    - total_flows: Count of all malicious flows across sessions and logs
-    - anomalies_today: Count of anomalies detected today across sessions and logs
+    Returns live summary statistics from MongoDB / session store:
+    - total_flows: Count of all malicious flows across all time (baseline + all sessions)
+    - anomalies_today: Count of anomalies detected strictly within the active calendar day
     - model_accuracy: Fixed test set accuracy (99.93%)
     - threat_categories: Count of distinct anomaly types in DB
     """
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
 
     collection = mongo_db["traffic_logs"]
     sessions_col = mongo_db["scan_sessions"]
 
-    now = datetime.now(timezone.utc)
-    today_start = datetime(now.year, now.month, now.day)
+    # Calculate local calendar day window in UTC
+    today_start_utc = None
+    today_end_utc = None
 
-    # 1. Anomalies today: sum total_anomalies from scan_sessions created or updated today
-    p_sess_today = [
-        {"$match": {
-            "$or": [
-                {"start_time": {"$gte": today_start}},
-                {"updated_at": {"$gte": today_start}}
-            ]
-        }},
-        {"$group": {
-            "_id": None,
-            "total_anomalies": {"$sum": "$total_anomalies"},
-            "total_scanned": {"$sum": "$total_scanned"}
-        }}
-    ]
-    res_sess = await sessions_col.aggregate(p_sess_today).to_list(1)
-    sess_anomalies_today = res_sess[0]["total_anomalies"] if res_sess else 0
+    if client_date:
+        try:
+            parts = [int(p) for p in client_date.strip().split("-")]
+            if len(parts) == 3:
+                local_day_start = datetime(parts[0], parts[1], parts[2])
+                offset_min = int(tz_offset) if tz_offset is not None else 0
+                today_start_utc = local_day_start + timedelta(minutes=offset_min)
+                today_end_utc = today_start_utc + timedelta(days=1)
+        except Exception as e:
+            print(f"[WARN] client_date parse error: {e}")
 
-    # Fallback to direct traffic_logs if any
-    p_today = [{"$match": {"prediction": {"$exists": True, "$ne": "BENIGN"}, "timestamp": {"$gte": today_start}}}, {"$count": "total"}]
-    res_today = await collection.aggregate(p_today).to_list(1)
-    raw_logs_today = res_today[0]["total"] if res_today else 0
+    if not today_start_utc:
+        now_utc = datetime.now(timezone.utc)
+        today_start_utc = datetime(now_utc.year, now_utc.month, now_utc.day)
+        today_end_utc = today_start_utc + timedelta(days=1)
 
-    anomalies_today = max(sess_anomalies_today, raw_logs_today)
+    if hasattr(today_start_utc, "tzinfo") and today_start_utc.tzinfo is not None:
+        today_start_utc = today_start_utc.astimezone(timezone.utc).replace(tzinfo=None)
+    if hasattr(today_end_utc, "tzinfo") and today_end_utc.tzinfo is not None:
+        today_end_utc = today_end_utc.astimezone(timezone.utc).replace(tzinfo=None)
 
-    # 2. Total malicious flows count (all-time)
-    all_sess = await sessions_col.aggregate([
-        {"$group": {"_id": None, "total": {"$sum": "$total_anomalies"}}}
-    ]).to_list(1)
-    sess_total_all = all_sess[0]["total"] if all_sess else 0
-    raw_logs_total = await collection.count_documents({"prediction": {"$exists": True, "$ne": "BENIGN"}})
-    total_flows = max(sess_total_all, raw_logs_total, anomalies_today)
-
-    # 3. Distinct threat categories
-    threat_types = await collection.distinct("prediction", {"prediction": {"$ne": "BENIGN"}})
+    # 1. Fetch all scan sessions safely
+    all_sessions = []
     try:
-        async for s in sessions_col.find({}, {"threat_breakdown": 1}):
-            tb = s.get("threat_breakdown") or {}
-            for k in tb.keys():
-                if k != "BENIGN" and k not in threat_types:
-                    threat_types.append(k)
-    except Exception:
-        pass
-    threat_categories_count = len([t for t in threat_types if t])
+        cursor = sessions_col.find({})
+        all_sessions = await cursor.to_list(1000)
+    except Exception as e:
+        print(f"[WARN] Error fetching scan sessions: {e}")
 
-    # Realistic SOC baseline so portfolio / site opens with full operational telemetry
+    sess_anomalies_today = 0
+    sess_total_all = 0
+    threat_types = set()
+
+    for s in all_sessions:
+        anom = int(s.get("total_anomalies", 0) or 0)
+        sess_total_all += anom
+
+        st = s.get("start_time") or s.get("updated_at")
+        st_utc = None
+        if st:
+            if isinstance(st, str):
+                try:
+                    st_utc = datetime.fromisoformat(st.replace("Z", "+00:00"))
+                except Exception:
+                    pass
+            elif isinstance(st, datetime):
+                st_utc = st
+
+            if st_utc:
+                if hasattr(st_utc, "tzinfo") and st_utc.tzinfo is not None:
+                    st_utc = st_utc.astimezone(timezone.utc).replace(tzinfo=None)
+
+                # Strict check: only count sessions whose start_time falls strictly in today's window
+                if today_start_utc <= st_utc < today_end_utc:
+                    sess_anomalies_today += anom
+
+        tb = s.get("threat_breakdown") or {}
+        for k in tb.keys():
+            if k != "BENIGN":
+                threat_types.add(k)
+
+    # 2. Check traffic_logs for any live sniffer flows
+    raw_logs_today = 0
+    raw_logs_total = 0
+    try:
+        raw_types = await collection.distinct("prediction", {"prediction": {"$ne": "BENIGN"}})
+        for rt in raw_types:
+            if rt:
+                threat_types.add(rt)
+        
+        # Check logs directly
+        if hasattr(collection, "docs"):
+            for d in collection.docs:
+                if d.get("prediction") and d.get("prediction") != "BENIGN":
+                    raw_logs_total += 1
+                    t = d.get("timestamp")
+                    t_utc = None
+                    if isinstance(t, str):
+                        try:
+                            t_utc = datetime.fromisoformat(t.replace("Z", "+00:00"))
+                        except Exception:
+                            pass
+                    elif isinstance(t, datetime):
+                        t_utc = t
+                    if t_utc:
+                        if hasattr(t_utc, "tzinfo") and t_utc.tzinfo is not None:
+                            t_utc = t_utc.astimezone(timezone.utc).replace(tzinfo=None)
+                        if today_start_utc <= t_utc < today_end_utc:
+                            raw_logs_today += 1
+        else:
+            # Real MongoDB queries
+            raw_logs_total = await collection.count_documents({"prediction": {"$exists": True, "$ne": "BENIGN"}})
+            p_today = [
+                {"$match": {"prediction": {"$exists": True, "$ne": "BENIGN"}, "timestamp": {"$gte": today_start_utc, "$lt": today_end_utc}}},
+                {"$count": "total"}
+            ]
+            r_today = await collection.aggregate(p_today).to_list(1)
+            raw_logs_today = r_today[0]["total"] if r_today else 0
+    except Exception as e:
+        print(f"[WARN] Error inspecting traffic_logs: {e}")
+
     BASE_TOTAL_FLOWS = 2841920
-    BASE_ANOMALIES_TODAY = 14280
     BASE_THREAT_CATEGORIES = 13
 
-    total_flows = BASE_TOTAL_FLOWS + total_flows
-    anomalies_today = BASE_ANOMALIES_TODAY + anomalies_today
-    threat_categories_count = max(BASE_THREAT_CATEGORIES, threat_categories_count)
+    total_flows = BASE_TOTAL_FLOWS + max(sess_total_all, raw_logs_total)
+    anomalies_today = max(sess_anomalies_today, raw_logs_today)
+    threat_categories_count = max(BASE_THREAT_CATEGORIES, len(threat_types))
+
+    last_scan_anomalies = 0
+    if all_sessions:
+        last_scan_anomalies = int(all_sessions[-1].get("total_anomalies", 0) or 0)
 
     return {
         "total_flows": total_flows,
         "anomalies_today": anomalies_today,
+        "last_scan_anomalies": last_scan_anomalies,
         "model_accuracy": "99.93%",
         "threat_categories": threat_categories_count
     }
