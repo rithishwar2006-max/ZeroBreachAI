@@ -71,7 +71,7 @@ def debug_status():
     res = {
         "engine": str(engine.url) if engine else None,
         "is_sqlite": "sqlite" in str(engine.url) if engine else False,
-        "commit": "e97fa12-telemetry-options-verified",
+        "commit": "3c8e040-cumulative-anomalies-fix",
         "dataset_sizes": sizes,
     }
     try:

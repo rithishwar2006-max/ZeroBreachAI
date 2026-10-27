@@ -370,6 +370,8 @@ document.documentElement.classList.add('js');
       });
     }
 
+    let scanRecorded = false;
+
     function resetUI() {
       window.__ZB_IS_SCANNING__ = false;
       scanBtn.style.display = 'inline-block';
@@ -387,6 +389,10 @@ document.documentElement.classList.add('js');
         if (eventSource) {
           eventSource.close();
           eventSource = null;
+        }
+        if (!scanRecorded && totalAnoms > 0 && typeof recordCompletedScanAnomalies === 'function') {
+          recordCompletedScanAnomalies(totalAnoms);
+          scanRecorded = true;
         }
         if (statusText) {
           statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff0055;margin-right:6px"></span>STOPPED BY USER';
@@ -466,12 +472,13 @@ document.documentElement.classList.add('js');
       }
 
       // Reset counters & live table (Stateless restart from row 1)
+      scanRecorded = false;
       totalRows = 0;
       totalAnoms = 0;
       window.__ZB_STREAM_ANOMALIES__ = 0;
       window.__ZB_IS_SCANNING__ = true;
-      window.__ZB_PRE_SCAN_TODAY__ = typeof window.__ZB_SERVER_TODAY_ANOMS__ === 'number' ? window.__ZB_SERVER_TODAY_ANOMS__ : 0;
-      window.__ZB_PRE_SCAN_TOTAL__ = typeof window.__ZB_SERVER_TOTAL_FLOWS__ === 'number' ? window.__ZB_SERVER_TOTAL_FLOWS__ : 2841920;
+      window.__ZB_PRE_SCAN_TODAY__ = typeof getTodayAccumulated === 'function' ? getTodayAccumulated() : 0;
+      window.__ZB_PRE_SCAN_TOTAL__ = typeof getAllTimeTotal === 'function' ? getAllTimeTotal() : 2841920;
       if (scannedCount) scannedCount.textContent = '0';
       if (anomCount) anomCount.textContent = '0';
       if (chunkIdEl) chunkIdEl.textContent = '#0';
@@ -528,10 +535,10 @@ document.documentElement.classList.add('js');
           const vFound = document.getElementById('v-found');
           if (vFound) vFound.textContent = totalAnoms.toLocaleString();
           const v2 = document.getElementById('v2');
-          const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : 0;
+          const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : (typeof getTodayAccumulated === 'function' ? getTodayAccumulated() : 0);
           if (v2) v2.textContent = (preToday + totalAnoms).toLocaleString();
           const v1 = document.getElementById('v1');
-          const preTotal = typeof window.__ZB_PRE_SCAN_TOTAL__ === 'number' ? window.__ZB_PRE_SCAN_TOTAL__ : 2841920;
+          const preTotal = typeof window.__ZB_PRE_SCAN_TOTAL__ === 'number' ? window.__ZB_PRE_SCAN_TOTAL__ : (typeof getAllTimeTotal === 'function' ? getAllTimeTotal() : 2841920);
           if (v1) v1.textContent = (preTotal + totalAnoms).toLocaleString();
 
           // Smoothly throttled dashboard refresh (at most once every 1.5s to keep UI at 60 FPS)
@@ -596,21 +603,10 @@ document.documentElement.classList.add('js');
             if (anomCount) anomCount.textContent = totalAnoms.toLocaleString();
             if (chunkIdEl && data.total_chunks !== undefined) chunkIdEl.textContent = '#' + data.total_chunks;
 
-            try {
-              const d = new Date();
-              const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-              localStorage.setItem('zb_last_scan_anoms', totalAnoms.toString());
-              localStorage.setItem('zb_last_scan_date', todayStr);
-            } catch(e) {}
-
-            const vFound = document.getElementById('v-found');
-            if (vFound) vFound.textContent = totalAnoms.toLocaleString();
-            const v2 = document.getElementById('v2');
-            const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : 0;
-            if (v2) v2.textContent = (preToday + totalAnoms).toLocaleString();
-            const v1 = document.getElementById('v1');
-            const preTotal = typeof window.__ZB_PRE_SCAN_TOTAL__ === 'number' ? window.__ZB_PRE_SCAN_TOTAL__ : 2841920;
-            if (v1) v1.textContent = (preTotal + totalAnoms).toLocaleString();
+            if (!scanRecorded && typeof recordCompletedScanAnomalies === 'function') {
+              recordCompletedScanAnomalies(totalAnoms);
+              scanRecorded = true;
+            }
           }
           if (statusText) {
             statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#10b981;margin-right:6px"></span>SCAN COMPLETE';
@@ -634,6 +630,10 @@ document.documentElement.classList.add('js');
 
       eventSource.addEventListener('error', (err) => {
         if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+          if (!scanRecorded && totalAnoms > 0 && typeof recordCompletedScanAnomalies === 'function') {
+            recordCompletedScanAnomalies(totalAnoms);
+            scanRecorded = true;
+          }
           if (statusText) {
             statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#10b981;margin-right:6px"></span>SCAN FINISHED';
             statusText.style.color = '#10b981';
@@ -1201,6 +1201,10 @@ document.documentElement.classList.add('js');
               const data = await res.json();
               if (data.session) {
                 window.showLiveCaptureReport(data.session);
+                const anomCount = Number(data.session.anomalies_count) || 0;
+                if (typeof recordCompletedScanAnomalies === 'function') {
+                  recordCompletedScanAnomalies(anomCount);
+                }
               }
               if (typeof window.fetchStats === 'function') window.fetchStats();
               if (typeof window.fetchAlerts === 'function') window.fetchAlerts();
@@ -1336,19 +1340,80 @@ document.documentElement.classList.add('js');
       return `${year}-${month}-${day}`;
     }
 
+    function getTodayAccumulated() {
+      const localDateStr = getLocalDateString();
+      const lastDate = localStorage.getItem('zb_today_accumulated_date');
+      if (lastDate !== localDateStr) {
+        // Midnight reset! Clean 0 for new day
+        localStorage.setItem('zb_today_accumulated_date', localDateStr);
+        localStorage.setItem('zb_today_accumulated_anoms', '0');
+        localStorage.setItem('zb_last_scan_anoms', '0');
+        return 0;
+      }
+      return parseInt(localStorage.getItem('zb_today_accumulated_anoms') || '0', 10);
+    }
+
+    function getAllTimeTotal() {
+      const base = 2841920;
+      const stored = parseInt(localStorage.getItem('zb_all_time_total') || '0', 10);
+      return Math.max(base, stored);
+    }
+
+    function recordCompletedScanAnomalies(scanCount) {
+      const localDateStr = getLocalDateString();
+      const count = Number(scanCount) || 0;
+
+      const lastDate = localStorage.getItem('zb_today_accumulated_date');
+      let todayAccum = 0;
+      if (lastDate === localDateStr) {
+        todayAccum = parseInt(localStorage.getItem('zb_today_accumulated_anoms') || '0', 10);
+      }
+      const preScanToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : 0;
+      const serverToday = typeof window.__ZB_SERVER_TODAY_ANOMS__ === 'number' ? window.__ZB_SERVER_TODAY_ANOMS__ : 0;
+      const baseline = Math.max(todayAccum, preScanToday, serverToday);
+
+      todayAccum = baseline + count;
+      localStorage.setItem('zb_today_accumulated_anoms', todayAccum.toString());
+      localStorage.setItem('zb_today_accumulated_date', localDateStr);
+
+      localStorage.setItem('zb_last_scan_anoms', count.toString());
+      localStorage.setItem('zb_last_scan_date', localDateStr);
+
+      let allTime = getAllTimeTotal() + count;
+      localStorage.setItem('zb_all_time_total', allTime.toString());
+
+      const vFound = document.getElementById('v-found');
+      if (vFound) vFound.textContent = count.toLocaleString('en-US');
+      const v2 = document.getElementById('v2');
+      if (v2) v2.textContent = todayAccum.toLocaleString('en-US');
+      const v1 = document.getElementById('v1');
+      if (v1) v1.textContent = allTime.toLocaleString('en-US');
+    }
+    window.recordCompletedScanAnomalies = recordCompletedScanAnomalies;
+
     // ---- Live Stat Band Metrics ----
     async function fetchStats() {
       const localDateStr = getLocalDateString();
       const tzOffset = new Date().getTimezoneOffset();
+      const localTodayAccum = getTodayAccumulated();
+      const localAllTime = getAllTimeTotal();
 
       // Check if calendar day transitioned (past midnight in user's timezone)
       const lastSeenDate = localStorage.getItem('zb_stat_date');
       if (lastSeenDate && lastSeenDate !== localDateStr) {
         // Next day reached! Clear yesterday's scan anomalies
         localStorage.removeItem('zb_last_scan_anoms');
+        localStorage.setItem('zb_today_accumulated_anoms', '0');
         window.__ZB_STREAM_ANOMALIES__ = 0;
       }
       localStorage.setItem('zb_stat_date', localDateStr);
+
+      let currentScanAnoms = 0;
+      if (window.__ZB_IS_SCANNING__) {
+        currentScanAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
+      } else if (localStorage.getItem('zb_last_scan_date') === localDateStr && localStorage.getItem('zb_last_scan_anoms') !== null) {
+        currentScanAnoms = parseInt(localStorage.getItem('zb_last_scan_anoms'), 10) || 0;
+      }
 
       try {
         const t0 = performance.now();
@@ -1357,31 +1422,33 @@ document.documentElement.classList.add('js');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
 
-        // Keep server baselines cached
-        window.__ZB_SERVER_TODAY_ANOMS__ = Number(data.anomalies_today) || 0;
-        window.__ZB_SERVER_TOTAL_FLOWS__ = Number(data.total_flows) || 2841920;
-
-        // Determine current scan anomalies:
-        let currentScanAnoms = 0;
-        if (window.__ZB_IS_SCANNING__) {
-          currentScanAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
-        } else if (localStorage.getItem('zb_last_scan_date') === localDateStr && localStorage.getItem('zb_last_scan_anoms') !== null) {
-          currentScanAnoms = parseInt(localStorage.getItem('zb_last_scan_anoms'), 10) || 0;
-        } else if (data.last_scan_anomalies !== undefined && data.anomalies_today > 0) {
+        if (!window.__ZB_IS_SCANNING__ && currentScanAnoms === 0 && data.last_scan_anomalies) {
           currentScanAnoms = Number(data.last_scan_anomalies) || 0;
         }
 
-        // Determine anomalies today (strictly for the current calendar day):
-        let anomaliesToday = Number(data.anomalies_today) || 0;
+        // Server might return daily anomalies from DB sessions
+        const serverToday = Number(data.anomalies_today) || 0;
+        window.__ZB_SERVER_TODAY_ANOMS__ = serverToday;
+        let anomaliesToday = Math.max(serverToday, localTodayAccum);
+        if (anomaliesToday > localTodayAccum) {
+          localStorage.setItem('zb_today_accumulated_anoms', anomaliesToday.toString());
+          localStorage.setItem('zb_today_accumulated_date', localDateStr);
+        }
+
         if (window.__ZB_IS_SCANNING__) {
-          const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : 0;
+          const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : localTodayAccum;
           anomaliesToday = preToday + currentScanAnoms;
         }
 
-        // Determine total all-time malicious flows:
-        let totalMalicious = Number(data.total_flows) || 2841920;
+        const serverTotal = Number(data.total_flows) || 2841920;
+        window.__ZB_SERVER_TOTAL_FLOWS__ = serverTotal;
+        let totalMalicious = Math.max(serverTotal, localAllTime);
+        if (totalMalicious > localAllTime) {
+          localStorage.setItem('zb_all_time_total', totalMalicious.toString());
+        }
+
         if (window.__ZB_IS_SCANNING__) {
-          const preTotal = typeof window.__ZB_PRE_SCAN_TOTAL__ === 'number' ? window.__ZB_PRE_SCAN_TOTAL__ : 2841920;
+          const preTotal = typeof window.__ZB_PRE_SCAN_TOTAL__ === 'number' ? window.__ZB_PRE_SCAN_TOTAL__ : localAllTime;
           totalMalicious = preTotal + currentScanAnoms;
         }
 
@@ -1431,15 +1498,18 @@ document.documentElement.classList.add('js');
           }
         }
       } catch(e) {
-        console.warn('Stats fetch offline - Using Benchmark Statistics:', e);
-        let currentScanAnoms = 0;
+        console.warn('Stats fetch offline / fallback:', e);
+        let anomaliesToday = localTodayAccum;
         if (window.__ZB_IS_SCANNING__) {
-          currentScanAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
-        } else if (localStorage.getItem('zb_last_scan_date') === localDateStr && localStorage.getItem('zb_last_scan_anoms') !== null) {
-          currentScanAnoms = parseInt(localStorage.getItem('zb_last_scan_anoms'), 10) || 0;
+          const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : localTodayAccum;
+          anomaliesToday = preToday + currentScanAnoms;
         }
-        const anomaliesToday = currentScanAnoms;
-        const totalMalicious = 2841920 + currentScanAnoms;
+
+        let totalMalicious = localAllTime;
+        if (window.__ZB_IS_SCANNING__) {
+          const preTotal = typeof window.__ZB_PRE_SCAN_TOTAL__ === 'number' ? window.__ZB_PRE_SCAN_TOTAL__ : localAllTime;
+          totalMalicious = preTotal + currentScanAnoms;
+        }
 
         const heroLat = document.getElementById('hero-telem-latency');
         if (heroLat) heroLat.textContent = '12.4ms';
