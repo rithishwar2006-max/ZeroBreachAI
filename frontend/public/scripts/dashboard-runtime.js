@@ -68,7 +68,12 @@ document.documentElement.classList.add('js');
   function animateCount(id, end, opts){
     opts = opts || {};
     const el = document.getElementById(id);
-    if (!el || !end) return;
+    if (!el || end === undefined || end === null || isNaN(end)) return;
+    if (end === 0) {
+      el.textContent = (opts.prefix||'') + '0' + (opts.suffix||'');
+      el.dataset.animating = '0';
+      return;
+    }
     if (el.dataset.animating === String(end)) return;
     el.dataset.animating = String(end);
 
@@ -1343,6 +1348,14 @@ document.documentElement.classList.add('js');
     function getTodayAccumulated() {
       const localDateStr = getLocalDateString();
       const lastDate = localStorage.getItem('zb_today_accumulated_date');
+      const stored = localStorage.getItem('zb_today_accumulated_anoms');
+
+      // Purge legacy 14280 artifact if present in storage
+      if (stored === '14280') {
+        localStorage.setItem('zb_today_accumulated_anoms', '0');
+        return 0;
+      }
+
       if (lastDate !== localDateStr) {
         // Midnight reset! Clean 0 for new day
         localStorage.setItem('zb_today_accumulated_date', localDateStr);
@@ -1350,7 +1363,8 @@ document.documentElement.classList.add('js');
         localStorage.setItem('zb_last_scan_anoms', '0');
         return 0;
       }
-      return parseInt(localStorage.getItem('zb_today_accumulated_anoms') || '0', 10);
+      const val = parseInt(stored || '0', 10);
+      return val === 14280 ? 0 : (isNaN(val) ? 0 : val);
     }
 
     function getAllTimeTotal() {
@@ -1366,10 +1380,11 @@ document.documentElement.classList.add('js');
       const lastDate = localStorage.getItem('zb_today_accumulated_date');
       let todayAccum = 0;
       if (lastDate === localDateStr) {
-        todayAccum = parseInt(localStorage.getItem('zb_today_accumulated_anoms') || '0', 10);
+        const stored = parseInt(localStorage.getItem('zb_today_accumulated_anoms') || '0', 10) || 0;
+        if (stored !== 14280) todayAccum = stored;
       }
-      const preScanToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : 0;
-      const serverToday = typeof window.__ZB_SERVER_TODAY_ANOMS__ === 'number' ? window.__ZB_SERVER_TODAY_ANOMS__ : 0;
+      const preScanToday = (typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' && window.__ZB_PRE_SCAN_TODAY__ !== 14280) ? window.__ZB_PRE_SCAN_TODAY__ : 0;
+      const serverToday = (typeof window.__ZB_SERVER_TODAY_ANOMS__ === 'number' && window.__ZB_SERVER_TODAY_ANOMS__ !== 14280) ? window.__ZB_SERVER_TODAY_ANOMS__ : 0;
       const baseline = Math.max(todayAccum, preScanToday, serverToday);
 
       todayAccum = baseline + count;
@@ -1400,8 +1415,8 @@ document.documentElement.classList.add('js');
 
       // Check if calendar day transitioned (past midnight in user's timezone)
       const lastSeenDate = localStorage.getItem('zb_stat_date');
-      if (lastSeenDate && lastSeenDate !== localDateStr) {
-        // Next day reached! Clear yesterday's scan anomalies
+      if (!lastSeenDate || lastSeenDate !== localDateStr) {
+        // Next day reached or fresh session! Clear yesterday's scan anomalies
         localStorage.removeItem('zb_last_scan_anoms');
         localStorage.setItem('zb_today_accumulated_anoms', '0');
         window.__ZB_STREAM_ANOMALIES__ = 0;
@@ -1412,7 +1427,8 @@ document.documentElement.classList.add('js');
       if (window.__ZB_IS_SCANNING__) {
         currentScanAnoms = window.__ZB_STREAM_ANOMALIES__ || 0;
       } else if (localStorage.getItem('zb_last_scan_date') === localDateStr && localStorage.getItem('zb_last_scan_anoms') !== null) {
-        currentScanAnoms = parseInt(localStorage.getItem('zb_last_scan_anoms'), 10) || 0;
+        const storedLast = parseInt(localStorage.getItem('zb_last_scan_anoms'), 10) || 0;
+        if (storedLast !== 14280) currentScanAnoms = storedLast;
       }
 
       try {
@@ -1423,20 +1439,23 @@ document.documentElement.classList.add('js');
         const data = await res.json();
 
         if (!window.__ZB_IS_SCANNING__ && currentScanAnoms === 0 && data.last_scan_anomalies) {
-          currentScanAnoms = Number(data.last_scan_anomalies) || 0;
+          const lsa = Number(data.last_scan_anomalies) || 0;
+          if (lsa !== 14280) currentScanAnoms = lsa;
         }
 
         // Server might return daily anomalies from DB sessions
-        const serverToday = Number(data.anomalies_today) || 0;
+        let serverToday = Number(data.anomalies_today) || 0;
+        if (serverToday === 14280) serverToday = 0; // Filter legacy mock constant
         window.__ZB_SERVER_TODAY_ANOMS__ = serverToday;
+        
         let anomaliesToday = Math.max(serverToday, localTodayAccum);
-        if (anomaliesToday > localTodayAccum) {
+        if (anomaliesToday > localTodayAccum && anomaliesToday !== 14280) {
           localStorage.setItem('zb_today_accumulated_anoms', anomaliesToday.toString());
           localStorage.setItem('zb_today_accumulated_date', localDateStr);
         }
 
         if (window.__ZB_IS_SCANNING__) {
-          const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : localTodayAccum;
+          const preToday = (typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' && window.__ZB_PRE_SCAN_TODAY__ !== 14280) ? window.__ZB_PRE_SCAN_TODAY__ : localTodayAccum;
           anomaliesToday = preToday + currentScanAnoms;
         }
 
@@ -1470,17 +1489,17 @@ document.documentElement.classList.add('js');
         const vFound = document.getElementById('v-found');
         if (vFound) vFound.textContent = Number(currentScanAnoms).toLocaleString('en-US');
 
+        const v1 = document.getElementById('v1');
+        const v2 = document.getElementById('v2');
+        const v4 = document.getElementById('v4');
+        if (v1) v1.textContent = Number(totalMalicious).toLocaleString('en-US');
+        if (v2) v2.textContent = Number(anomaliesToday).toLocaleString('en-US');
+        if (v4) v4.textContent = threatCats;
+
         if (typeof animateCount === 'function') {
           animateCount('v1', totalMalicious);
           animateCount('v2', anomaliesToday);
           animateCount('v4', threatCats);
-        } else {
-          const v1 = document.getElementById('v1');
-          const v2 = document.getElementById('v2');
-          const v4 = document.getElementById('v4');
-          if (v1) v1.textContent = Number(totalMalicious).toLocaleString('en-US');
-          if (v2) v2.textContent = Number(anomaliesToday).toLocaleString('en-US');
-          if (v4) v4.textContent = threatCats;
         }
         
         const sp = document.querySelector('.status-pill');
@@ -1499,9 +1518,9 @@ document.documentElement.classList.add('js');
         }
       } catch(e) {
         console.warn('Stats fetch offline / fallback:', e);
-        let anomaliesToday = localTodayAccum;
+        let anomaliesToday = localTodayAccum === 14280 ? 0 : localTodayAccum;
         if (window.__ZB_IS_SCANNING__) {
-          const preToday = typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' ? window.__ZB_PRE_SCAN_TODAY__ : localTodayAccum;
+          const preToday = (typeof window.__ZB_PRE_SCAN_TODAY__ === 'number' && window.__ZB_PRE_SCAN_TODAY__ !== 14280) ? window.__ZB_PRE_SCAN_TODAY__ : anomaliesToday;
           anomaliesToday = preToday + currentScanAnoms;
         }
 
@@ -1522,17 +1541,17 @@ document.documentElement.classList.add('js');
 
         const vFound = document.getElementById('v-found');
         if (vFound) vFound.textContent = Number(currentScanAnoms).toLocaleString('en-US');
+        const v2 = document.getElementById('v2');
+        if (v2) v2.textContent = Number(anomaliesToday).toLocaleString('en-US');
+        const v1 = document.getElementById('v1');
+        if (v1) v1.textContent = Number(totalMalicious).toLocaleString('en-US');
 
         if (typeof animateCount === 'function') {
           animateCount('v1', totalMalicious);
           animateCount('v2', anomaliesToday);
           animateCount('v4', 13);
         } else {
-          const v1 = document.getElementById('v1');
-          const v2 = document.getElementById('v2');
           const v4 = document.getElementById('v4');
-          if (v1) v1.textContent = Number(totalMalicious).toLocaleString('en-US');
-          if (v2) v2.textContent = Number(anomaliesToday).toLocaleString('en-US');
           if (v4) v4.textContent = '13';
         }
       }
