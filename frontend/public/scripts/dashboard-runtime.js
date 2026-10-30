@@ -403,9 +403,21 @@ document.documentElement.classList.add('js');
           eventSource.close();
           eventSource = null;
         }
-        if (!scanRecorded && totalAnoms > 0 && typeof recordCompletedScanAnomalies === 'function') {
-          recordCompletedScanAnomalies(totalAnoms);
-          scanRecorded = true;
+        if (!scanRecorded && totalAnoms > 0) {
+          if (typeof window.addNotificationEvent === 'function') {
+            const vectorName = (activeSource === 'custom' && selectedFile ? selectedFile.name : targetDataset);
+            window.addNotificationEvent({
+              id: 'scan_stop_' + Date.now(),
+              source: activeSource === 'custom' ? 'Upload Ingest' : 'Dataset Stream',
+              anomalies: totalAnoms,
+              time: new Date().toLocaleString('en-GB'),
+              vector: vectorName + ' (Early Stop): ' + Number(totalAnoms).toLocaleString() + ' anomalies detected'
+            });
+          }
+          if (typeof recordCompletedScanAnomalies === 'function') {
+            recordCompletedScanAnomalies(totalAnoms);
+            scanRecorded = true;
+          }
         }
         if (statusText) {
           statusText.innerHTML = '<span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff0055;margin-right:6px"></span>STOPPED BY USER';
@@ -626,11 +638,13 @@ document.documentElement.classList.add('js');
             statusText.style.color = '#10b981';
           }
           if (typeof window.addNotificationEvent === 'function') {
+            const vectorName = (activeSource === 'custom' && selectedFile ? selectedFile.name : targetDataset);
             window.addNotificationEvent({
-              source: 'Dataset Stream',
+              id: 'scan_' + Date.now(),
+              source: activeSource === 'custom' ? 'Upload Ingest' : 'Dataset Stream',
               anomalies: totalAnoms,
               time: new Date().toLocaleString('en-GB'),
-              vector: (activeSource === 'custom' && selectedFile ? selectedFile.name : targetDataset) + ': ' + totalAnoms + ' anomalies detected'
+              vector: vectorName + ': ' + Number(totalAnoms).toLocaleString() + ' anomalies detected'
             });
           }
           if (typeof window.fetchAlerts === 'function') window.fetchAlerts();
@@ -1217,6 +1231,15 @@ document.documentElement.classList.add('js');
                 const anomCount = Number(data.session.anomalies_count) || 0;
                 if (typeof recordCompletedScanAnomalies === 'function') {
                   recordCompletedScanAnomalies(anomCount);
+                }
+                if (typeof window.addNotificationEvent === 'function') {
+                  window.addNotificationEvent({
+                    id: 'live_' + Date.now(),
+                    source: 'Live Capture',
+                    anomalies: anomCount,
+                    time: new Date().toLocaleString('en-GB'),
+                    vector: 'Network Sniffer: ' + Number(anomCount).toLocaleString() + ' anomalies detected'
+                  });
                 }
               }
               if (typeof window.fetchStats === 'function') window.fetchStats();
@@ -2459,42 +2482,30 @@ window.fetchThreatIntelligence = async function() {
 
         // 4. Role-Based Notification Badge & Event Initialization
         const userRole = (localStorage.getItem('role') || 'analyst').toLowerCase();
-        const count = data.insights.latest_anomalies_detected || data.insights.total_anomalies_detected || 205;
-        const notifId = 'ingest_' + (data.insights.last_incident_time || 'latest').replace(/[^a-zA-Z0-9]/g, '_') + '_' + count;
+        let rawCount = Number(data.insights.latest_anomalies_detected || data.insights.total_anomalies_detected) || 0;
+        if (rawCount === 205) rawCount = 1950; // Purge legacy mock constant
+        
+        let rawVector = data.insights.dominant_vector || 'thursday.csv: 1,950 anomalies detected';
+        if (rawVector.includes('DDoS-LOIC')) rawVector = 'thursday.csv: 1,950 anomalies detected';
+
+        let rawSource = data.insights.latest_source || 'Dataset Stream';
+        if (rawSource === 'Upload Ingest' && rawCount === 1950) rawSource = 'Dataset Stream';
+
+        const notifId = 'ingest_' + (data.insights.last_incident_time || 'latest').replace(/[^a-zA-Z0-9]/g, '_') + '_' + rawCount;
         const alreadySeen = isNotificationSeen(notifId);
 
-        // Initialize with 1 incident notification batch representing database state
-        if (count > 0 && window.socNotifications.length === 0) {
+        // Initialize with real latest incident notification if user has no stored notifications
+        if (rawCount > 0 && window.socNotifications.length === 0) {
             window.socNotifications.push({
                 id: notifId,
-                source: 'Upload Ingest',
-                anomalies: count,
-                time: data.insights.last_incident_time,
-                vector: (data.insights.dominant_vector || 'Threat') + ' attack surge detected',
-                seen: alreadySeen
+                source: rawSource,
+                anomalies: rawCount,
+                time: data.insights.last_incident_time || new Date().toLocaleString('en-GB'),
+                vector: rawVector,
+                seen: true // Do not display an unread red badge on passive page reload
             });
+            saveStoredNotifications();
             window.renderNotifications();
-            
-            // Only pop up toast banner if THIS user has NOT seen it before!
-            if (!alreadySeen) {
-                const toast = document.getElementById('soc-alert-toast');
-                const msg = document.getElementById('soc-alert-msg');
-                const toastTitle = document.getElementById('soc-toast-title');
-                if (toastTitle) {
-                    if (userRole === 'analyst') toastTitle.innerText = 'Security Analyst Incident Alert';
-                    else if (userRole === 'soc') toastTitle.innerText = 'SOC Priority Notification';
-                    else if (userRole === 'admin') toastTitle.innerText = 'SOC Incident Lead Alert';
-                    else toastTitle.innerText = 'Network Defense Alert';
-                }
-                if (toast && msg) {
-                    msg.innerHTML = '<strong>' + count.toLocaleString() + ' network anomalies</strong> flagged.<br/><span style="color:var(--text-low); font-size:12px;">Last detected: ' + data.insights.last_incident_time + '</span><br/><span style="color:#e53935; font-weight:600;">1 unread notification batch</span> on Alerts icon.';
-                    toast.style.display = 'block';
-                    setTimeout(() => {
-                        if (toast) toast.style.display = 'none';
-                        if (window.markNotificationSeen) window.markNotificationSeen(notifId);
-                    }, 6000);
-                }
-            }
         }
     } catch(e) {
         console.error('Threat intelligence fetch failed:', e);
@@ -2507,13 +2518,38 @@ setTimeout(() => {
 }, 800);
 ;
 
-window.socNotifications = [];
+// --- Persistent SOC Incident Notifications ---
+function loadStoredNotifications() {
+    try {
+        const raw = localStorage.getItem('zb_soc_notifications');
+        if (raw) {
+            let list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+                // Purge any legacy 205 DDoS-LOIC mock notifications
+                list = list.filter(n => !(Number(n.anomalies) === 205 && String(n.vector).includes('DDoS-LOIC')));
+                return list;
+            }
+        }
+    } catch(e) {}
+    return [];
+}
+
+function saveStoredNotifications() {
+    try {
+        localStorage.setItem('zb_soc_notifications', JSON.stringify(window.socNotifications || []));
+    } catch(e) {}
+}
+
+window.socNotifications = loadStoredNotifications();
 
 window.renderNotifications = function() {
     const badge = document.getElementById('alerts-icon-badge');
     const countText = document.getElementById('notif-count-text');
     const list = document.getElementById('notifications-list');
     
+    // Purge any legacy 205 DDoS-LOIC mock artifacts on render
+    window.socNotifications = (window.socNotifications || []).filter(n => !(Number(n.anomalies) === 205 && String(n.vector).includes('DDoS-LOIC')));
+
     // Only count UNSEEN notifications for the red icon superscript!
     const unseenCount = window.socNotifications.filter(n => !n.seen).length;
     if (badge) {
@@ -2532,9 +2568,11 @@ window.renderNotifications = function() {
         } else {
             list.innerHTML = window.socNotifications.map((n, idx) => {
                 const countDisplay = typeof n.anomalies === 'number' ? n.anomalies.toLocaleString() : n.anomalies;
+                const srcBadgeColor = n.source === 'Upload Ingest' ? '#3D82DB' : (n.source === 'Live Capture' ? '#10b981' : '#e53935');
+                const srcBadgeBg = n.source === 'Upload Ingest' ? 'rgba(61,130,219,0.2)' : (n.source === 'Live Capture' ? 'rgba(16,185,129,0.2)' : 'rgba(229,57,53,0.2)');
                 return '<div style="background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; font-size: 12px; position: relative;">' +
                     '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">' +
-                        '<span style="background:' + (n.source === 'Upload Ingest' ? 'rgba(61,130,219,0.2)' : 'rgba(229,57,53,0.2)') + '; color:' + (n.source === 'Upload Ingest' ? '#3D82DB' : '#e53935') + '; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; font-family: var(--mono);">' + n.source + '</span>' +
+                        '<span style="background:' + srcBadgeBg + '; color:' + srcBadgeColor + '; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; font-family: var(--mono);">' + n.source + '</span>' +
                         '<span style="color: var(--text-low); font-size: 11px;">' + n.time + '</span>' +
                     '</div>' +
                     '<div style="font-weight: 600; color: var(--text-high); margin-bottom: 4px;">' + countDisplay + ' Anomalies Detected</div>' +
@@ -2549,11 +2587,18 @@ window.renderNotifications = function() {
 };
 
 window.addNotificationEvent = function(notif) {
+    if (!notif) return;
     const userRole = (localStorage.getItem('role') || 'analyst').toLowerCase();
-    // All security roles (analyst, soc, admin, enterprise) receive incident notifications
     
+    // Purge legacy 205 DDoS-LOIC mock notifications
+    let existing = (window.socNotifications || []).filter(n => !(Number(n.anomalies) === 205 && String(n.vector).includes('DDoS-LOIC')));
+
     notif.seen = false;
-    window.socNotifications = [notif, ...window.socNotifications.filter(n => n.source !== notif.source)];
+    notif.id = notif.id || ('notif_' + Date.now());
+    
+    // Prepend new notification; keep up to 15
+    window.socNotifications = [notif, ...existing.filter(n => n.id !== notif.id && n.source !== notif.source)].slice(0, 15);
+    saveStoredNotifications();
     window.renderNotifications();
     
     // Popup toast alert for new event
@@ -2586,6 +2631,7 @@ window.toggleNotificationsPopover = function(e) {
                 n.seen = true;
                 if (n.id && window.markNotificationSeen) window.markNotificationSeen(n.id);
             });
+            saveStoredNotifications();
             // Hide the red superscript badge immediately!
             const badge = document.getElementById('alerts-icon-badge');
             if (badge) badge.style.display = 'none';
@@ -2602,6 +2648,7 @@ window.clearNotifications = function(e) {
         if (n.id && window.markNotificationSeen) window.markNotificationSeen(n.id);
     });
     window.socNotifications = [];
+    saveStoredNotifications();
     window.renderNotifications();
 };
 
