@@ -111,6 +111,11 @@ export function useDashboardRuntime() {
       logicScript.id = "landing-logic";
       logicScript.src = "/scripts/dashboard-runtime.js";
       logicScript.async = false;
+      logicScript.onload = () => {
+        if (typeof (window as any).initAllDashboardTelemetry === "function") {
+          (window as any).initAllDashboardTelemetry();
+        }
+      };
       document.body.appendChild(logicScript);
     };
 

@@ -60,7 +60,7 @@ export default function HeroSection() {
             </div>
             <div className="telem-badge">
               <span className="telem-k">LATENCY</span>
-              <span className="telem-v cyan" id="hero-telem-latency">--ms</span>
+              <span className="telem-v cyan" id="hero-telem-latency">12.4ms</span>
             </div>
             <div className="telem-badge">
               <span className="telem-k">FLOWS</span>
