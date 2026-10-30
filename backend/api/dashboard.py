@@ -1258,19 +1258,26 @@ async def get_threat_intelligence(current_user: User = Depends(get_current_user)
         latest_source = "Dataset Stream"
         dominant_vector = "thursday.csv: 1,950 anomalies detected"
 
+    t_recent = now - timedelta(minutes=35)
+    last_time_iso = t_recent.isoformat()
+
     if not last_time_str:
         if latest_doc and latest_doc.get("timestamp"):
             last_time = latest_doc.get("timestamp")
             if hasattr(last_time, 'astimezone'):
                 last_time = last_time.replace(tzinfo=timezone.utc).astimezone() if last_time.tzinfo is None else last_time.astimezone()
                 last_time_str = last_time.strftime("%d/%m/%Y, %H:%M:%S")
+                last_time_iso = last_time.isoformat()
             elif hasattr(last_time, 'strftime'):
                 last_time_str = last_time.strftime("%d/%m/%Y, %H:%M:%S")
             else:
                 last_time_str = str(last_time)
         else:
-            t_recent = now - timedelta(minutes=35)
             last_time_str = t_recent.astimezone().strftime("%d/%m/%Y, %H:%M:%S")
+            last_time_iso = t_recent.isoformat()
+    elif 'st' in locals() and st:
+        if hasattr(st, 'isoformat'):
+            last_time_iso = st.isoformat()
 
     insights = {
         "dominant_vector": dominant_vector,
@@ -1279,7 +1286,8 @@ async def get_threat_intelligence(current_user: User = Depends(get_current_user)
         "latest_anomalies_detected": latest_batch_count,
         "critical_active_threats": len([a for a in top_attackers if a["risk_score"] >= 70]),
         "most_targeted_host": top_targets[0]["ip"] if top_targets else "192.168.10.50",
-        "last_incident_time": last_time_str
+        "last_incident_time": last_time_str,
+        "last_incident_time_iso": last_time_iso
     }
     
     return {

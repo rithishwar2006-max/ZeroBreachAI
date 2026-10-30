@@ -1331,6 +1331,9 @@ document.documentElement.classList.add('js');
         if (typeof window.renderFlowWave === 'function') {
           window.renderFlowWave(buckets);
         }
+        if (typeof window.renderNotifications === 'function') {
+          window.renderNotifications();
+        }
       } catch (err) {
         console.warn('Flow volume fallback engage:', err);
         const now = Date.now();
@@ -1365,6 +1368,9 @@ document.documentElement.classList.add('js');
         window.__ZB_LAST_FLOW_BUCKETS__ = fallbackBuckets;
         if (typeof window.renderFlowWave === 'function') {
           window.renderFlowWave(fallbackBuckets);
+        }
+        if (typeof window.renderNotifications === 'function') {
+          window.renderNotifications();
         }
       }
     }
@@ -2491,7 +2497,19 @@ window.fetchThreatIntelligence = async function() {
         let rawSource = data.insights.latest_source || 'Dataset Stream';
         if (rawSource === 'Upload Ingest' && rawCount === 1950) rawSource = 'Dataset Stream';
 
-        const notifId = 'ingest_' + (data.insights.last_incident_time || 'latest').replace(/[^a-zA-Z0-9]/g, '_') + '_' + rawCount;
+        let initialTime = data.insights.last_incident_time_iso || data.insights.last_incident_time;
+        if (window.__ZB_LAST_FLOW_BUCKETS__ && Array.isArray(window.__ZB_LAST_FLOW_BUCKETS__)) {
+            const match = window.__ZB_LAST_FLOW_BUCKETS__.find(b => 
+                (b.count && Number(b.count) === Number(rawCount)) ||
+                (b.filename && rawVector.toLowerCase().includes(b.filename.toLowerCase()))
+            );
+            if (match && match.label) {
+                initialTime = match.label;
+            }
+        }
+        initialTime = formatLocalNotificationTime(initialTime);
+
+        const notifId = 'ingest_' + String(initialTime).replace(/[^a-zA-Z0-9]/g, '_') + '_' + rawCount;
         const alreadySeen = isNotificationSeen(notifId);
 
         // Initialize with real latest incident notification if user has no stored notifications
@@ -2500,7 +2518,7 @@ window.fetchThreatIntelligence = async function() {
                 id: notifId,
                 source: rawSource,
                 anomalies: rawCount,
-                time: data.insights.last_incident_time || new Date().toLocaleString('en-GB'),
+                time: initialTime,
                 vector: rawVector,
                 seen: true // Do not display an unread red badge on passive page reload
             });
@@ -2518,7 +2536,44 @@ setTimeout(() => {
 }, 800);
 ;
 
-// --- Persistent SOC Incident Notifications ---
+// --- Persistent SOC Incident Notifications & Time Localizer ---
+function formatLocalNotificationTime(dateInput) {
+    if (!dateInput) dateInput = new Date();
+    let d = null;
+    if (dateInput instanceof Date && !isNaN(dateInput.getTime())) {
+        d = dateInput;
+    } else if (typeof dateInput === 'number') {
+        d = new Date(dateInput);
+    } else if (typeof dateInput === 'string') {
+        // If already in standard formatted localized string like "30 Oct, 11:34 am"
+        if (/^[0-9]{1,2}\s+[A-Za-z]{3},\s+[0-9]{1,2}:[0-9]{2}\s+(am|pm)/i.test(dateInput)) {
+            return dateInput;
+        }
+        const testD = new Date(dateInput);
+        if (!isNaN(testD.getTime())) {
+            d = testD;
+        } else if (dateInput.includes('/')) {
+            // Server UTC format "DD/MM/YYYY, HH:MM:SS" -> convert to ISO UTC specifier
+            const parts = dateInput.split(', ');
+            if (parts.length === 2) {
+                const dateParts = parts[0].split('/');
+                if (dateParts.length === 3) {
+                    const isoStr = `${dateParts[2]}-${dateParts[1].padStart(2, '0')}-${dateParts[0].padStart(2, '0')}T${parts[1]}Z`;
+                    const utcD = new Date(isoStr);
+                    if (!isNaN(utcD.getTime())) d = utcD;
+                }
+            }
+        }
+    }
+    if (d && !isNaN(d.getTime())) {
+        const datePart = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const timePart = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+        return `${datePart}, ${timePart}`;
+    }
+    return String(dateInput);
+}
+window.formatLocalNotificationTime = formatLocalNotificationTime;
+
 function loadStoredNotifications() {
     try {
         const raw = localStorage.getItem('zb_soc_notifications');
@@ -2570,10 +2625,25 @@ window.renderNotifications = function() {
                 const countDisplay = typeof n.anomalies === 'number' ? n.anomalies.toLocaleString() : n.anomalies;
                 const srcBadgeColor = n.source === 'Upload Ingest' ? '#3D82DB' : (n.source === 'Live Capture' ? '#10b981' : '#e53935');
                 const srcBadgeBg = n.source === 'Upload Ingest' ? 'rgba(61,130,219,0.2)' : (n.source === 'Live Capture' ? 'rgba(16,185,129,0.2)' : 'rgba(229,57,53,0.2)');
+
+                // Synchronize timestamp with matching 3D flow bucket so notifications and 3D pillars match 100%
+                let displayTime = n.time;
+                if (window.__ZB_LAST_FLOW_BUCKETS__ && Array.isArray(window.__ZB_LAST_FLOW_BUCKETS__)) {
+                    const match = window.__ZB_LAST_FLOW_BUCKETS__.find(b => 
+                        (b.count && Number(b.count) === Number(n.anomalies)) ||
+                        (b.filename && n.vector && n.vector.toLowerCase().includes(b.filename.toLowerCase()))
+                    );
+                    if (match && match.label) {
+                        displayTime = match.label;
+                        n.time = match.label;
+                    }
+                }
+                displayTime = formatLocalNotificationTime(displayTime);
+
                 return '<div style="background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; font-size: 12px; position: relative;">' +
                     '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">' +
                         '<span style="background:' + srcBadgeBg + '; color:' + srcBadgeColor + '; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; font-family: var(--mono);">' + n.source + '</span>' +
-                        '<span style="color: var(--text-low); font-size: 11px;">' + n.time + '</span>' +
+                        '<span style="color: var(--text-low); font-size: 11px;">' + displayTime + '</span>' +
                     '</div>' +
                     '<div style="font-weight: 600; color: var(--text-high); margin-bottom: 4px;">' + countDisplay + ' Anomalies Detected</div>' +
                     '<div style="color: var(--text-low); font-size: 11px; margin-bottom: 8px;">' + n.vector + '</div>' +
@@ -2595,6 +2665,7 @@ window.addNotificationEvent = function(notif) {
 
     notif.seen = false;
     notif.id = notif.id || ('notif_' + Date.now());
+    notif.time = formatLocalNotificationTime(notif.time);
     
     // Prepend new notification; keep up to 15
     window.socNotifications = [notif, ...existing.filter(n => n.id !== notif.id && n.source !== notif.source)].slice(0, 15);
